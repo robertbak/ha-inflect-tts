@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import sys
+import time
 import types
 import wave
 from pathlib import Path
@@ -188,6 +189,7 @@ class OnnxInflectEngine:
         if not normalized:
             raise InflectModelError("Text must not be empty.")
 
+        start_time = time.monotonic()
         chunks = split_text(normalized)
         pieces: list[np.ndarray] = []
         rng = np.random.RandomState(seed)
@@ -243,4 +245,18 @@ class OnnxInflectEngine:
             wav_file.setsampwidth(2)
             wav_file.setframerate(self._sample_rate)
             wav_file.writeframes(pcm16.tobytes())
+
+        elapsed = time.monotonic() - start_time
+        audio_seconds = len(pcm16) / self._sample_rate
+        rtf = elapsed / audio_seconds if audio_seconds else float("inf")
+        _LOGGER.info(
+            "Synthesized %.1fs of audio in %.2fs (RTF %.2f, %dx realtime) "
+            "for %d chars, model=%s",
+            audio_seconds,
+            elapsed,
+            rtf,
+            round(1 / rtf) if rtf else 0,
+            len(normalized),
+            self._model_key,
+        )
         return buffer.getvalue()
