@@ -1,0 +1,43 @@
+"""Constants for the Inflect TTS integration."""
+
+DOMAIN = "inflect_tts"
+
+CONF_MODEL = "model"
+CONF_SPEED = "speed"
+CONF_VARIATION = "variation"
+CONF_SEED = "seed"
+
+MODEL_MICRO = "micro"
+MODEL_NANO = "nano"
+
+MODEL_REPOS = {
+    MODEL_MICRO: "owensong/Inflect-Micro-v2",
+    MODEL_NANO: "owensong/Inflect-Nano-v2",
+}
+
+MODEL_NAMES = {
+    MODEL_MICRO: "Inflect Micro v2",
+    MODEL_NANO: "Inflect Nano v2",
+}
+
+DEFAULT_MODEL = MODEL_NANO
+DEFAULT_SPEED = 1.0
+DEFAULT_VARIATION = 0.667
+DEFAULT_SEED = 7
+
+MIN_SPEED = 0.5
+MAX_SPEED = 2.0
+MIN_VARIATION = 0.0
+MAX_VARIATION = 1.0
+
+SUPPORT_LANGUAGES = ["en-US"]
+DEFAULT_LANG = "en-US"
+
+SAMPLE_RATE = 24000
+
+# Upstream onnxruntime has no musllinux (Alpine) wheel, which is what HA's
+# own container runs on -- these are built from source (see
+# ../../sidecar/musl-wheel-build/) and served as a PEP 503 index covering
+# both architectures HA runs on, so pip resolves the right one on its own.
+ONNXRUNTIME_VERSION = "1.28.0"
+ONNXRUNTIME_INDEX_URL = "https://robertbak.github.io/onnxruntime-musllinux-wheels/"

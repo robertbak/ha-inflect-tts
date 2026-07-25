@@ -1,0 +1,27 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Service is already configured"
+    },
+    "error": {
+      "model_artifacts_missing": "This model's ONNX files aren't bundled with the integration -- reinstall it"
+    },
+    "step": {
+      "user": {
+        "title": "Set up Inflect TTS",
+        "description": "Runs the Inflect models directly (no sidecar needed).",
+        "data": {
+          "model": "Model",
+          "speed": "Default speed",
+          "variation": "Default variation",
+          "seed": "Default seed"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "synthesis_error": {
+      "message": "Failed to synthesize speech: {error}"
+    }
+  }
+}
