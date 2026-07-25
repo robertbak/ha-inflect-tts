@@ -12,11 +12,8 @@ copied from what the sidecar's own export stage produces -- see
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from .const import MODELS_DIR
 from .onnx_engine import InflectModelError, OnnxInflectEngine
-
-MODELS_DIR = Path(__file__).parent / "models"
 
 _engines: dict[str, OnnxInflectEngine] = {}
 

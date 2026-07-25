@@ -1,6 +1,16 @@
 """Constants for the Inflect TTS integration."""
 
+from pathlib import Path
+
 DOMAIN = "inflect_tts"
+
+# Deliberately defined here rather than in model.py: config_flow.py needs
+# this path (to check a model's artifacts exist) without importing
+# onnx_engine.py, which imports onnxruntime at module level -- onnxruntime
+# may not be installed yet the first time config_flow loads (see
+# onnxruntime_install.py), and config_flow is imported before any config
+# entry (and thus before __init__.py's async_setup_entry) ever runs.
+MODELS_DIR = Path(__file__).parent / "models"
 
 CONF_MODEL = "model"
 CONF_SPEED = "speed"

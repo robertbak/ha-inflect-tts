@@ -24,8 +24,8 @@ from .const import (
     MIN_SPEED,
     MIN_VARIATION,
     MODEL_NAMES,
+    MODELS_DIR,
 )
-from .model import MODELS_DIR
 
 _LOGGER = logging.getLogger(__name__)
 
