@@ -312,7 +312,17 @@ def _configure_espeak() -> None:
     espeak_tmp_dir = integration_root / "tmp"
     try:
         espeak_tmp_dir.mkdir(exist_ok=True)
-        os.environ.setdefault("TMPDIR", str(espeak_tmp_dir))
+        # Setting os.environ["TMPDIR"] alone isn't enough: (1) a long-
+        # running HA process almost always calls tempfile before this
+        # code ever runs, and tempfile resolves + caches its default dir
+        # exactly once (lazily, on first use) -- an env change afterward
+        # is invisible to it; (2) even on a first call, HA's own
+        # container commonly exports TMPDIR=/tmp already, which
+        # setdefault() would then just leave alone. Overriding the
+        # module attribute directly sidesteps both.
+        import tempfile
+
+        tempfile.tempdir = str(espeak_tmp_dir)
     except OSError:
         pass
 
