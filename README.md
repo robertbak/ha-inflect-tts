@@ -33,7 +33,7 @@ directory, restart, then add the integration as above.
 
 ## Setup
 
-Pick a model (Micro is smaller/faster, Nano is higher quality), and
+Pick a model (Nano is smaller/faster, Micro is higher quality), and
 optionally set default speed/variation/seed -- these can be overridden
 per-call via TTS options. The first load installs `onnxruntime` (see
 above) and installs the plain-Python dependencies (`numpy`, `phonemizer`,
