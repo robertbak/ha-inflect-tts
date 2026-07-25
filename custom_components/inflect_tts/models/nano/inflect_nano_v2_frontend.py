@@ -300,6 +300,22 @@ def _configure_espeak() -> None:
     bundled_library = bundled_dir / "libespeak-ng.so.1"
     bundled_data = bundled_dir / "espeak-ng-data"
 
+    # phonemizer's EspeakAPI always copies whichever library we hand it
+    # into a fresh tempfile.mkdtemp() dir before loading it (dlopen()
+    # refuses to load the same library twice, so each wrapper instance
+    # needs its own copy) -- and on real HA installs (HAOS) /tmp is
+    # commonly mounted noexec, so dlopen-ing that copy fails with
+    # "Operation not permitted" even though the original bundled path
+    # loads fine. Point TMPDIR at a directory inside this integration
+    # instead, which we already know permits exec.
+    integration_root = Path(__file__).parent.parent.parent
+    espeak_tmp_dir = integration_root / "tmp"
+    try:
+        espeak_tmp_dir.mkdir(exist_ok=True)
+        os.environ.setdefault("TMPDIR", str(espeak_tmp_dir))
+    except OSError:
+        pass
+
     system_libraries = (
         Path("/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1"),
         Path("/usr/lib/libespeak-ng.so.1"),  # Alpine/musl
