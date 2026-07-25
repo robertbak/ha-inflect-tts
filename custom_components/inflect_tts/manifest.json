@@ -16,5 +16,5 @@
     "typing-extensions>=4.9",
     "phonemizer>=3.3"
   ],
-  "version": "0.3.1"
+  "version": "0.3.2"
 }

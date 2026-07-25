@@ -39,12 +39,21 @@ per-call via TTS options. The first load installs `onnxruntime` (see
 above) and installs the plain-Python dependencies (`numpy`, `phonemizer`,
 etc.) from PyPI as usual.
 
-Requires `espeak-ng` on the host/container for text-to-phoneme conversion
-(`apk add espeak-ng` on Alpine, `apt-get install espeak-ng` on Debian-based
-images) -- not something HACS/pip can install, since it's a system package.
+Text-to-phoneme conversion needs `espeak-ng`, a system-level dependency
+that neither HACS nor pip can install -- and on real HA installs (HACS/HAOS)
+there's no supported way to `apk add` something into the core container
+persistently anyway, since it's rebuilt from the stock image on every
+update. So a musl-built `libespeak-ng.so` (extracted from Alpine's own
+package, one per architecture) ships inside this repo and is used
+directly -- no system package needed at all.
 
 ## What's bundled
 
-The ONNX model graphs and text frontend for both models ship inside this
-repo under `custom_components/inflect_tts/models/` (~52MB total) -- no
-separate download step at runtime.
+- `custom_components/inflect_tts/models/` -- the ONNX model graphs and
+  text frontend for both models (~52MB total)
+- `custom_components/inflect_tts/espeak/{x86_64,aarch64}/` -- a
+  musl-built `libespeak-ng.so.1` + its data files + two small runtime
+  dependencies, so phonemization works out of the box on Alpine/HAOS
+  without any system package install
+
+No separate download step at runtime for any of the above.

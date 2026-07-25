@@ -3,13 +3,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
+import shutil
 import sys
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 
 from num2words import num2words
+
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 
 MONTHS = [
@@ -282,17 +288,55 @@ def _configure_espeak() -> None:
     if _ESPEAK_CONFIGURED:
         return
 
-    # Prefer the persistent distro library for long Linux preprocessing jobs.
-    # espeakng-loader extracts a temporary shared object, which can exhaust mmap
-    # resources when phonemizer repeatedly creates backends over a large corpus.
+    # HA's official container is Alpine (musl libc); on real installs
+    # (HACS/HAOS) users can't `apk add` a system package persistently --
+    # the core container is rebuilt from the stock image on every update.
+    # So a musl-built libespeak-ng.so is bundled directly with this
+    # integration (extracted from Alpine's own espeak-ng package, one per
+    # arch), and checked first. System libraries and espeakng-loader (a
+    # glibc-only wheel, no use on musl, but fine on non-Alpine hosts) are
+    # kept as fallbacks for non-HA/dev environments.
+    bundled_dir = Path(__file__).parent.parent.parent / "espeak" / platform.machine()
+    bundled_library = bundled_dir / "libespeak-ng.so.1"
+    bundled_data = bundled_dir / "espeak-ng-data"
+
     system_libraries = (
         Path("/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1"),
         Path("/usr/lib/libespeak-ng.so.1"),  # Alpine/musl
         Path("/usr/lib/aarch64-linux-gnu/libespeak-ng.so.1"),
         Path("/usr/lib64/libespeak-ng.so.1"),
     )
-    system_library = next((path for path in system_libraries if path.is_file()), None)
-    if system_library is not None:
+
+    if bundled_library.is_file():
+        # libespeak-ng.so.1 needs libpcaudio.so.0 (bundled alongside it,
+        # unused at runtime -- we only phonemize, never play audio -- but
+        # still a load-time dependency) which in turn needs libasound.so.2
+        # (also bundled, same reason). Neither is on the dynamic linker's
+        # default search path. Setting LD_LIBRARY_PATH doesn't help here:
+        # musl's dynamic linker (unlike glibc) only reads it once at
+        # process start, not on later dlopen() calls -- so an env var set
+        # from inside a running HA process is invisible to it. Instead,
+        # copy just those two small dependency libs into /usr/lib, which
+        # *is* on the default search path; libespeak-ng.so.1 itself is
+        # still loaded from its bundled path directly (no search needed
+        # for that one, it's opened by absolute path).
+        try:
+            for dep_name in ("libpcaudio.so.0", "libasound.so.2"):
+                target = Path("/usr/lib") / dep_name
+                if not target.exists():
+                    shutil.copy2(bundled_dir / dep_name, target)
+        except OSError as exc:
+            _LOGGER.warning(
+                "Could not install bundled espeak-ng dependencies into "
+                "/usr/lib (%s) -- falling back to system espeak-ng if any",
+                exc,
+            )
+        else:
+            os.environ.setdefault("PHONEMIZER_ESPEAK_LIBRARY", str(bundled_library))
+            os.environ.setdefault("ESPEAK_DATA_PATH", str(bundled_data))
+    elif (system_library := next(
+        (path for path in system_libraries if path.is_file()), None
+    )) is not None:
         os.environ.setdefault("PHONEMIZER_ESPEAK_LIBRARY", str(system_library))
     else:
         import espeakng_loader
