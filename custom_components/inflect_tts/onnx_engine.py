@@ -141,6 +141,10 @@ class OnnxInflectEngine:
     def is_loaded(self) -> bool:
         return self._duration_sess is not None
 
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
     def load(self) -> None:
         if not self._artifact_dir.exists():
             raise InflectModelError(
@@ -193,22 +197,7 @@ class OnnxInflectEngine:
             raise InflectModelError("The text frontend produced no speakable tokens.")
         return np.asarray([sequence], dtype=np.int64)
 
-    def synthesize(
-        self,
-        text: str,
-        speed: float = 1.0,
-        variation: float = 0.667,
-        seed: int = 7,
-    ) -> bytes:
-        if self._duration_sess is None or self._decode_sess is None:
-            raise InflectModelError("Model is not loaded")
-
-        # np.random.RandomState requires an int seed -- callers (e.g. HA's
-        # NumberSelector-backed config options) may hand us a float.
-        speed = float(speed)
-        variation = float(variation)
-        seed = int(seed)
-
+    def _prepare(self, text: str) -> tuple[str, list[str]]:
         normalized = " ".join(text.split())
         if not normalized:
             raise InflectModelError("Text must not be empty.")
@@ -218,66 +207,52 @@ class OnnxInflectEngine:
             # syllable's audio gets allocated too few frames and sounds
             # clipped. This is audio-only -- doesn't affect the caller's text.
             normalized += "."
+        return normalized, split_text(normalized)
 
-        start_time = time.monotonic()
-        chunks = split_text(normalized)
-        pieces: list[np.ndarray] = []
-        rng = np.random.RandomState(seed)
+    def _run_chunk(
+        self, chunk: str, speed: float, variation: float, rng: np.random.RandomState
+    ) -> np.ndarray:
+        """Run one sentence chunk through both graphs. Returns a
+        float32 waveform piece (not yet clipped/quantized)."""
+        tokens = self._tokens(chunk)
+        lengths = np.asarray([tokens.shape[1]], dtype=np.int64)
+        length_scale = np.asarray(1.0 / speed, dtype=np.float32)
 
-        try:
-            for index, chunk in enumerate(chunks):
-                if index:
-                    pieces.append(
-                        np.zeros(
-                            round(self._sample_rate * boundary_pause_seconds(chunks[index - 1])),
-                            dtype=np.float32,
-                        )
-                    )
+        m_p_exp, logs_p_exp, y_mask = self._duration_sess.run(
+            None,
+            {"tokens": tokens, "lengths": lengths, "length_scale": length_scale},
+        )
 
-                tokens = self._tokens(chunk)
-                lengths = np.asarray([tokens.shape[1]], dtype=np.int64)
-                length_scale = np.asarray(1.0 / speed, dtype=np.float32)
+        zp_noise = rng.standard_normal(m_p_exp.shape).astype(np.float32)
+        noise_scale = np.asarray(variation, dtype=np.float32)
 
-                m_p_exp, logs_p_exp, y_mask = self._duration_sess.run(
-                    None,
-                    {
-                        "tokens": tokens,
-                        "lengths": lengths,
-                        "length_scale": length_scale,
-                    },
-                )
+        (waveform,) = self._decode_sess.run(
+            None,
+            {
+                "m_p_exp": m_p_exp,
+                "logs_p_exp": logs_p_exp,
+                "y_mask": y_mask,
+                "zp_noise": zp_noise,
+                "noise_scale": noise_scale,
+            },
+        )
+        return edge_fade(waveform[0, 0].astype(np.float32), self._sample_rate)
 
-                zp_noise = rng.standard_normal(m_p_exp.shape).astype(np.float32)
-                noise_scale = np.asarray(variation, dtype=np.float32)
+    def _pause_piece(self, previous_chunk: str) -> np.ndarray:
+        return np.zeros(
+            round(self._sample_rate * boundary_pause_seconds(previous_chunk)),
+            dtype=np.float32,
+        )
 
-                (waveform,) = self._decode_sess.run(
-                    None,
-                    {
-                        "m_p_exp": m_p_exp,
-                        "logs_p_exp": logs_p_exp,
-                        "y_mask": y_mask,
-                        "zp_noise": zp_noise,
-                        "noise_scale": noise_scale,
-                    },
-                )
-                pieces.append(edge_fade(waveform[0, 0].astype(np.float32), self._sample_rate))
-        except InflectModelError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise InflectModelError(f"Synthesis failed: {exc}") from exc
+    @staticmethod
+    def _pcm16_bytes(piece: np.ndarray) -> bytes:
+        return (np.clip(piece, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
 
-        full = np.clip(np.concatenate(pieces), -1.0, 1.0)
-        pcm16 = (full * 32767.0).astype("<i2")
-
-        buffer = io.BytesIO()
-        with wave.open(buffer, "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(self._sample_rate)
-            wav_file.writeframes(pcm16.tobytes())
-
+    def _record_stats(
+        self, normalized: str, total_samples: int, start_time: float
+    ) -> None:
         elapsed = time.monotonic() - start_time
-        audio_seconds = len(pcm16) / self._sample_rate
+        audio_seconds = total_samples / self._sample_rate
         rtf = elapsed / audio_seconds if audio_seconds else float("inf")
         realtime_factor = round(1 / rtf) if rtf else 0
         self.last_stats = {
@@ -298,4 +273,91 @@ class OnnxInflectEngine:
             len(normalized),
             self._model_key,
         )
+
+    def synthesize(
+        self,
+        text: str,
+        speed: float = 1.0,
+        variation: float = 0.667,
+        seed: int = 7,
+    ) -> bytes:
+        if self._duration_sess is None or self._decode_sess is None:
+            raise InflectModelError("Model is not loaded")
+
+        # np.random.RandomState requires an int seed -- callers (e.g. HA's
+        # NumberSelector-backed config options) may hand us a float.
+        speed = float(speed)
+        variation = float(variation)
+        seed = int(seed)
+
+        normalized, chunks = self._prepare(text)
+        start_time = time.monotonic()
+        pieces: list[np.ndarray] = []
+        rng = np.random.RandomState(seed)
+
+        try:
+            for index, chunk in enumerate(chunks):
+                if index:
+                    pieces.append(self._pause_piece(chunks[index - 1]))
+                pieces.append(self._run_chunk(chunk, speed, variation, rng))
+        except InflectModelError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise InflectModelError(f"Synthesis failed: {exc}") from exc
+
+        full = np.concatenate(pieces)
+        pcm16 = self._pcm16_bytes(full)
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(self._sample_rate)
+            wav_file.writeframes(pcm16)
+
+        self._record_stats(normalized, full.size, start_time)
         return buffer.getvalue()
+
+    def synthesize_stream(
+        self,
+        text: str,
+        speed: float = 1.0,
+        variation: float = 0.667,
+        seed: int = 7,
+    ):
+        """Like synthesize(), but yields raw 16-bit PCM bytes per sentence
+        chunk (plus inter-sentence pause silence) as each is generated,
+        instead of building the whole utterance before returning anything.
+        No WAV container -- the caller (tts.py's streaming path) wraps a
+        single streaming-safe header around the whole sequence.
+
+        Blocking, like synthesize() -- each next() call runs model
+        inference, so callers must pull this via the executor.
+        """
+        if self._duration_sess is None or self._decode_sess is None:
+            raise InflectModelError("Model is not loaded")
+
+        speed = float(speed)
+        variation = float(variation)
+        seed = int(seed)
+
+        normalized, chunks = self._prepare(text)
+        start_time = time.monotonic()
+        rng = np.random.RandomState(seed)
+        total_samples = 0
+
+        try:
+            for index, chunk in enumerate(chunks):
+                if index:
+                    pause = self._pause_piece(chunks[index - 1])
+                    total_samples += pause.size
+                    yield self._pcm16_bytes(pause)
+                piece = self._run_chunk(chunk, speed, variation, rng)
+                total_samples += piece.size
+                yield self._pcm16_bytes(piece)
+        except InflectModelError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise InflectModelError(f"Synthesis failed: {exc}") from exc
+
+        self._record_stats(normalized, total_samples, start_time)

@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import logging
+import struct
 from typing import Any
 
-from homeassistant.components.tts import TextToSpeechEntity, TtsAudioType
+from homeassistant.components.tts import (
+    TextToSpeechEntity,
+    TTSAudioRequest,
+    TTSAudioResponse,
+    TtsAudioType,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -30,10 +36,49 @@ from .const import (
     MODEL_NAMES,
     SUPPORT_LANGUAGES,
 )
-from .model import InflectModelError, get_engine, synthesize_with_stats, unload_engine
+from .model import (
+    InflectModelError,
+    get_engine,
+    get_stream,
+    synthesize_with_stats,
+    unload_engine,
+)
 
 SERVICE_LOAD_MODEL = "load_model"
 SERVICE_UNLOAD_MODEL = "unload_model"
+
+_STREAM_DONE = object()
+
+
+def _streaming_wav_header(
+    sample_rate: int, channels: int = 1, bits_per_sample: int = 16
+) -> bytes:
+    """A canonical 44-byte PCM WAV header with the size fields set to
+    the placeholder "unknown length" value, since the total duration
+    isn't known until the whole stream (all sentence chunks) has been
+    generated. Players/consumers that support streamed WAV treat this
+    as "play until the stream ends" rather than validating the exact
+    byte count -- the same trick used for e.g. streamed internet radio.
+    """
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    unknown_size = 0xFFFFFFFF
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        unknown_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,  # PCM
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b"data",
+        unknown_size,
+    )
 
 
 def stats_signal(entry_id: str) -> str:
@@ -126,6 +171,60 @@ class InflectTTSEntity(TextToSpeechEntity):
             async_dispatcher_send(self._hass, stats_signal(self._entry_id), stats)
         self._reschedule_idle_unload()
         return "wav", data
+
+    async def async_stream_tts_audio(
+        self, request: TTSAudioRequest
+    ) -> TTSAudioResponse:
+        """Stream audio sentence-by-sentence as it's generated, instead
+        of waiting for the whole message to finish synthesizing before
+        returning anything -- same per-sentence chunking approach used
+        for streaming in the companion web app."""
+        message = "".join([chunk async for chunk in request.message_gen])
+        speed = float(request.options.get(CONF_SPEED, self._default_speed))
+        variation = float(
+            request.options.get(CONF_VARIATION, self._default_variation)
+        )
+        seed = int(request.options.get(CONF_SEED, self._default_seed))
+
+        try:
+            engine, chunk_gen = await self._hass.async_add_executor_job(
+                get_stream, self._model_key, message, speed, variation, seed
+            )
+        except InflectModelError as exc:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="synthesis_error",
+                translation_placeholders={"error": str(exc)},
+            ) from exc
+
+        async def data_gen():
+            try:
+                yield _streaming_wav_header(engine.sample_rate)
+                while True:
+                    try:
+                        chunk = await self._hass.async_add_executor_job(
+                            next, chunk_gen, _STREAM_DONE
+                        )
+                    except InflectModelError as exc:
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN,
+                            translation_key="synthesis_error",
+                            translation_placeholders={"error": str(exc)},
+                        ) from exc
+                    if chunk is _STREAM_DONE:
+                        break
+                    yield chunk
+            finally:
+                # Runs whether the stream finished, errored, or the
+                # consumer disconnected early -- same bookkeeping the
+                # non-streaming path does after a synthesis call.
+                if engine.last_stats is not None:
+                    async_dispatcher_send(
+                        self._hass, stats_signal(self._entry_id), engine.last_stats
+                    )
+                self._reschedule_idle_unload()
+
+        return TTSAudioResponse("wav", data_gen())
 
     async def async_load_model(self) -> None:
         """Load the ONNX sessions now, ahead of the first TTS request.

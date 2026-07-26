@@ -13,6 +13,7 @@ copied from what the sidecar's own export stage produces -- see
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 
 from .const import MODELS_DIR
 from .onnx_engine import InflectModelError, OnnxInflectEngine
@@ -77,9 +78,34 @@ def synthesize_with_stats(
     return data, engine.last_stats
 
 
+def get_stream(
+    model_key: str,
+    text: str,
+    speed: float,
+    variation: float,
+    seed: int,
+) -> tuple[OnnxInflectEngine, Iterator[bytes]]:
+    """Load the engine (if needed) and return it along with a ready-to
+    -iterate generator of raw PCM16 chunks. Blocking -- call via
+    hass.async_add_executor_job. The generator itself is lazy (creating
+    it doesn't run any inference), so only this initial call needs the
+    executor for engine loading; each subsequent chunk still needs its
+    own executor call to advance the generator, since each one blocks
+    on model inference.
+
+    The returned engine is also the caller's cue for stats: read
+    engine.last_stats once the generator is exhausted.
+    """
+    engine = get_engine(model_key)
+    return engine, engine.synthesize_stream(
+        text, speed=speed, variation=variation, seed=seed
+    )
+
+
 __all__ = [
     "InflectModelError",
     "get_engine",
+    "get_stream",
     "synthesize",
     "synthesize_with_stats",
     "unload_engine",
