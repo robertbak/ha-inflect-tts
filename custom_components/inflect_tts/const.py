@@ -19,6 +19,7 @@ CONF_SEED = "seed"
 CONF_IDLE_UNLOAD_MINUTES = "idle_unload_minutes"
 CONF_STREAMING = "streaming"
 CONF_STREAM_READ_AHEAD = "stream_read_ahead"
+CONF_TURBO_MODE = "turbo_mode"
 
 MODEL_MICRO = "micro"
 MODEL_NANO = "nano"
@@ -58,6 +59,12 @@ DEFAULT_STREAMING = True
 # last measured synthesis speed (the "Synthesis speed" sensor) each
 # time a stream starts, instead of a fixed number.
 DEFAULT_STREAM_READ_AHEAD = 0
+# Break just the first sentence into smaller pieces on light-pause
+# punctuation (see onnx_engine.split_first_sentence_turbo), trading
+# some cross-fragment prosody for a faster time-to-first-sound while
+# streaming. Off by default -- it's a latency/naturalness tradeoff,
+# not something that should change behavior silently.
+DEFAULT_TURBO_MODE = False
 
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0

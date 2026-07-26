@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from custom_components.inflect_tts.onnx_engine import (
     boundary_pause_seconds,
+    split_first_sentence_turbo,
     split_text,
 )
 
@@ -75,3 +76,39 @@ def test_boundary_pause_seconds_by_ending_punctuation() -> None:
     assert boundary_pause_seconds("note:") == 0.13
     assert boundary_pause_seconds("comma,") == 0.09
     assert boundary_pause_seconds("no punctuation") == 0.08
+
+
+def test_turbo_splits_on_light_pause_punctuation() -> None:
+    text = "This is a long sentence, with a natural pause, that could split."
+    assert split_first_sentence_turbo(text) == [
+        "This is a long sentence,",
+        "with a natural pause,",
+        "that could split.",
+    ]
+
+
+def test_turbo_splits_on_standalone_dash() -> None:
+    text = "First part - second part - third part."
+    assert split_first_sentence_turbo(text) == [
+        "First part -",
+        "second part -",
+        "third part.",
+    ]
+
+
+def test_turbo_does_not_split_hyphenated_words() -> None:
+    text = "A well-known state-of-the-art model with no other punctuation."
+    assert split_first_sentence_turbo(text) == [text]
+
+
+def test_turbo_no_split_points_returns_original_as_single_piece() -> None:
+    text = "No pause points at all here"
+    assert split_first_sentence_turbo(text) == [text]
+
+
+def test_turbo_em_and_en_dash() -> None:
+    assert split_first_sentence_turbo("First — second – third.") == [
+        "First —",
+        "second –",
+        "third.",
+    ]

@@ -17,12 +17,14 @@
           "seed": "Default seed",
           "idle_unload_minutes": "Idle unload (minutes)",
           "streaming": "Streaming synthesis",
-          "stream_read_ahead": "Streaming read-ahead (seconds)"
+          "stream_read_ahead": "Streaming read-ahead (seconds)",
+          "turbo_mode": "Turbo mode"
         },
         "data_description": {
           "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently.",
           "streaming": "Stream audio sentence-by-sentence as it's generated, so playback can start before a long message finishes synthesizing. Turn off to fall back to generating the whole message before returning any audio, if streaming causes issues with your media player.",
-          "stream_read_ahead": "How many seconds of already-synthesized audio a background thread may build up ahead of what's already been sent, while streaming. Higher smooths over variance in per-sentence synthesis time (helps avoid audible gaps between sentences on slower hardware); never delays the very first sentence. 0 (default) computes it automatically from the last measured synthesis speed instead of a fixed number."
+          "stream_read_ahead": "How many seconds of already-synthesized audio a background thread may build up ahead of what's already been sent, while streaming. Higher smooths over variance in per-sentence synthesis time (helps avoid audible gaps between sentences on slower hardware); never delays the very first sentence. 0 (default) computes it automatically from the last measured synthesis speed instead of a fixed number.",
+          "turbo_mode": "Break just the first sentence of a streamed message into smaller pieces (on commas, semicolons, colons, and dashes), so the very first sound plays sooner. Trades some natural intonation on that first sentence for lower latency -- has no effect with streaming turned off."
         }
       }
     }
@@ -37,12 +39,14 @@
           "seed": "Default seed",
           "idle_unload_minutes": "Idle unload (minutes)",
           "streaming": "Streaming synthesis",
-          "stream_read_ahead": "Streaming read-ahead (seconds)"
+          "stream_read_ahead": "Streaming read-ahead (seconds)",
+          "turbo_mode": "Turbo mode"
         },
         "data_description": {
           "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently.",
           "streaming": "Stream audio sentence-by-sentence as it's generated, so playback can start before a long message finishes synthesizing. Turn off to fall back to generating the whole message before returning any audio, if streaming causes issues with your media player.",
-          "stream_read_ahead": "How many seconds of already-synthesized audio a background thread may build up ahead of what's already been sent, while streaming. Higher smooths over variance in per-sentence synthesis time (helps avoid audible gaps between sentences on slower hardware); never delays the very first sentence. 0 (default) computes it automatically from the last measured synthesis speed instead of a fixed number."
+          "stream_read_ahead": "How many seconds of already-synthesized audio a background thread may build up ahead of what's already been sent, while streaming. Higher smooths over variance in per-sentence synthesis time (helps avoid audible gaps between sentences on slower hardware); never delays the very first sentence. 0 (default) computes it automatically from the last measured synthesis speed instead of a fixed number.",
+          "turbo_mode": "Break just the first sentence of a streamed message into smaller pieces (on commas, semicolons, colons, and dashes), so the very first sound plays sooner. Trades some natural intonation on that first sentence for lower latency -- has no effect with streaming turned off."
         }
       }
     }

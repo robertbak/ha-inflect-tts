@@ -31,6 +31,7 @@ from .const import (
     CONF_SPEED,
     CONF_STREAM_READ_AHEAD,
     CONF_STREAMING,
+    CONF_TURBO_MODE,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_LANG,
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_SPEED,
     DEFAULT_STREAM_READ_AHEAD,
     DEFAULT_STREAMING,
+    DEFAULT_TURBO_MODE,
     DEFAULT_VARIATION,
     DOMAIN,
     MAX_STREAM_READ_AHEAD,
@@ -236,6 +238,7 @@ class InflectTTSEntity(TextToSpeechEntity):
                 settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD)
             ),
         )
+        self._turbo_mode = bool(settings.get(CONF_TURBO_MODE, DEFAULT_TURBO_MODE))
         self._unload_timer_cancel = None
 
         self._attr_name = MODEL_NAMES[self._model_key]
@@ -311,7 +314,13 @@ class InflectTTSEntity(TextToSpeechEntity):
 
         try:
             engine, chunk_gen, loaded_fresh = await self._hass.async_add_executor_job(
-                get_stream, self._model_key, message, speed, variation, seed
+                get_stream,
+                self._model_key,
+                message,
+                speed,
+                variation,
+                seed,
+                self._turbo_mode,
             )
         except InflectModelError as exc:
             raise HomeAssistantError(

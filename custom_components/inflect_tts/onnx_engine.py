@@ -82,6 +82,25 @@ def split_text(text: str, limit: int = 280) -> list[str]:
     return chunks
 
 
+_TURBO_SPLIT_PATTERN = re.compile(r"(?<=[,;:\-–—])\s+")
+
+
+def split_first_sentence_turbo(sentence: str) -> list[str]:
+    """Turbo mode: break a single sentence into smaller pieces on light-
+    pause punctuation (comma/semicolon/colon/dash/en-dash/em-dash),
+    instead of synthesizing it as one unit. Only ever applied to the
+    first sentence of a message -- the point is a faster time-to-first-
+    sound, which only matters for whatever gets sent first; splitting
+    every sentence this way would just add unnecessary pause seams
+    throughout. Loses some cross-fragment prosody the model would
+    otherwise carry across the whole sentence, in exchange for that.
+    A bare hyphen inside a word ("well-known") is never a split point
+    since the pattern only splits at whitespace following the mark.
+    """
+    pieces = [p.strip() for p in _TURBO_SPLIT_PATTERN.split(sentence) if p.strip()]
+    return pieces or [sentence]
+
+
 def boundary_pause_seconds(chunk: str) -> float:
     ending = chunk.rstrip()[-1:] if chunk.strip() else ""
     return {
@@ -210,7 +229,7 @@ class OnnxInflectEngine:
             raise InflectModelError("The text frontend produced no speakable tokens.")
         return np.asarray([sequence], dtype=np.int64)
 
-    def _prepare(self, text: str) -> tuple[str, list[str]]:
+    def _prepare(self, text: str, turbo: bool = False) -> tuple[str, list[str]]:
         normalized = " ".join(text.split())
         if not normalized:
             raise InflectModelError("Text must not be empty.")
@@ -220,7 +239,10 @@ class OnnxInflectEngine:
             # syllable's audio gets allocated too few frames and sounds
             # clipped. This is audio-only -- doesn't affect the caller's text.
             normalized += "."
-        return normalized, split_text(normalized)
+        chunks = split_text(normalized)
+        if turbo and chunks:
+            chunks = split_first_sentence_turbo(chunks[0]) + chunks[1:]
+        return normalized, chunks
 
     def _run_chunk(
         self, chunk: str, speed: float, variation: float, rng: np.random.RandomState
@@ -355,12 +377,19 @@ class OnnxInflectEngine:
         speed: float = 1.0,
         variation: float = 0.667,
         seed: int = 7,
+        turbo: bool = False,
     ):
         """Like synthesize(), but yields raw 16-bit PCM bytes per sentence
         chunk (plus inter-sentence pause silence) as each is generated,
         instead of building the whole utterance before returning anything.
         No WAV container -- the caller (tts.py's streaming path) wraps a
         single streaming-safe header around the whole sequence.
+
+        turbo further splits just the first sentence on light-pause
+        punctuation (see split_first_sentence_turbo), trading some
+        prosody for a faster time-to-first-sound -- meaningless for the
+        non-streaming synthesize(), which has no "first sound" to speed
+        up since everything's buffered before returning.
 
         Blocking, like synthesize() -- each next() call runs model
         inference, so callers must pull this via the executor.
@@ -372,7 +401,7 @@ class OnnxInflectEngine:
         variation = float(variation)
         seed = int(seed)
 
-        normalized, chunks = self._prepare(text)
+        normalized, chunks = self._prepare(text, turbo=turbo)
         start_time = time.monotonic()
         rng = np.random.RandomState(seed)
         total_samples = 0

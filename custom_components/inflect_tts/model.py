@@ -99,6 +99,7 @@ def get_stream(
     speed: float,
     variation: float,
     seed: int,
+    turbo: bool = False,
 ) -> tuple[OnnxInflectEngine, Iterator[bytes], bool]:
     """Load the engine (if needed) and return it along with a ready-to
     -iterate generator of raw PCM16 chunks, and whether this call just
@@ -115,7 +116,9 @@ def get_stream(
     engine, loaded_fresh = _get_or_load(model_key)
     return (
         engine,
-        engine.synthesize_stream(text, speed=speed, variation=variation, seed=seed),
+        engine.synthesize_stream(
+            text, speed=speed, variation=variation, seed=seed, turbo=turbo
+        ),
         loaded_fresh,
     )
 

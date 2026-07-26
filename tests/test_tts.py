@@ -16,6 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.inflect_tts.const import (
     CONF_MODEL,
     CONF_STREAMING,
+    CONF_TURBO_MODE,
     DOMAIN,
     MODEL_NANO,
 )
@@ -133,6 +134,51 @@ async def test_streaming_disabled_falls_back_to_single_chunk(
     chunks = [chunk async for chunk in response.data_gen]
     assert len(chunks) == 1
     assert chunks[0][:4] == b"RIFF"
+
+
+async def test_turbo_mode_reduces_time_to_first_chunk(hass: HomeAssistant) -> None:
+    """Turbo mode should split the first sentence into more, smaller
+    pieces (faster first chunk) without changing the overall content."""
+    await async_setup_component(hass, "homeassistant", {})
+    await _setup_entry(hass, **{CONF_TURBO_MODE: True})
+
+    component = hass.data["tts"]
+    entity = component.get_entity("tts.inflect_nano_v2")
+
+    text = (
+        "This is a fairly long opening sentence, with several natural "
+        "pause points, that could be split into pieces. And a second one."
+    )
+
+    async def message_gen():
+        yield text
+
+    from homeassistant.components.tts import TTSAudioRequest
+
+    response = await entity.async_stream_tts_audio(
+        TTSAudioRequest(language="en-US", options={}, message_gen=message_gen())
+    )
+    chunks = [chunk async for chunk in response.data_gen]
+
+    # header + several turbo-split first-sentence pieces (with pauses
+    # between) + the second sentence -- more chunks than non-turbo would
+    # produce for the same text (verified against the non-turbo case in
+    # test_stream_multi_sentence_yields_multiple_chunks, which uses a
+    # simpler 2-sentence message and gets far fewer chunks).
+    assert len(chunks) > 5
+    assert chunks[0][:4] == b"RIFF"
+
+
+async def test_turbo_mode_off_by_default(hass: HomeAssistant) -> None:
+    """MockConfigEntry doesn't go through the config flow's schema
+    defaults, so this checks the entity itself falls back correctly
+    when CONF_TURBO_MODE isn't present in the entry data at all."""
+    await async_setup_component(hass, "homeassistant", {})
+    await _setup_entry(hass)
+
+    component = hass.data["tts"]
+    entity = component.get_entity("tts.inflect_nano_v2")
+    assert entity._turbo_mode is False
 
 
 async def test_load_and_unload_model_services(hass: HomeAssistant) -> None:

@@ -23,6 +23,7 @@ from .const import (
     CONF_SPEED,
     CONF_STREAM_READ_AHEAD,
     CONF_STREAMING,
+    CONF_TURBO_MODE,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_MODEL,
@@ -30,6 +31,7 @@ from .const import (
     DEFAULT_SPEED,
     DEFAULT_STREAM_READ_AHEAD,
     DEFAULT_STREAMING,
+    DEFAULT_TURBO_MODE,
     DEFAULT_VARIATION,
     DOMAIN,
     MAX_IDLE_UNLOAD_MINUTES,
@@ -106,6 +108,9 @@ def _tuning_fields(current: dict[str, Any]) -> dict[Any, Any]:
             CONF_STREAM_READ_AHEAD,
             default=current.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD),
         ): _STREAM_READ_AHEAD_SELECTOR,
+        vol.Optional(
+            CONF_TURBO_MODE, default=current.get(CONF_TURBO_MODE, DEFAULT_TURBO_MODE)
+        ): bool,
     }
 
 
