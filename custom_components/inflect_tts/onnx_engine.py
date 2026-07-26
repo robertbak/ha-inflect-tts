@@ -25,6 +25,10 @@ from .const import MODEL_REPOS
 
 _LOGGER = logging.getLogger(__name__)
 
+# Extra silence appended after the true end of a synthesized message
+# (see OnnxInflectEngine._trailing_silence_piece).
+_TRAILING_SILENCE_SECONDS = 0.3
+
 
 def _stub_out_unused_segments_backend() -> None:
     """phonemizer.backend eagerly does `import segments` for its
@@ -253,6 +257,17 @@ class OnnxInflectEngine:
             dtype=np.float32,
         )
 
+    def _trailing_silence_piece(self) -> np.ndarray:
+        # Padding at the TRUE end of the whole message (not between
+        # sentences -- that's boundary_pause_seconds' job). Cheap
+        # insurance against the last word/syllable getting eaten if
+        # anything downstream (network buffering, a media player's own
+        # playback handling) trims a small amount off the very end of
+        # the stream -- better to lose silence than a trailing "s".
+        return np.zeros(
+            round(self._sample_rate * _TRAILING_SILENCE_SECONDS), dtype=np.float32
+        )
+
     @staticmethod
     def _pcm16_bytes(piece: np.ndarray) -> bytes:
         return (np.clip(piece, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
@@ -315,6 +330,7 @@ class OnnxInflectEngine:
                 if index:
                     pieces.append(self._pause_piece(chunks[index - 1]))
                 pieces.append(self._run_chunk(chunk, speed, variation, rng))
+            pieces.append(self._trailing_silence_piece())
         except InflectModelError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -370,6 +386,9 @@ class OnnxInflectEngine:
                 piece = self._run_chunk(chunk, speed, variation, rng)
                 total_samples += piece.size
                 yield self._pcm16_bytes(piece)
+            trailing_silence = self._trailing_silence_piece()
+            total_samples += trailing_silence.size
+            yield self._pcm16_bytes(trailing_silence)
         except InflectModelError:
             raise
         except Exception as exc:  # noqa: BLE001
