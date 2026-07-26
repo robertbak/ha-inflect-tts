@@ -207,7 +207,7 @@ class InflectTTSEntity(TextToSpeechEntity):
         seed = int(request.options.get(CONF_SEED, self._default_seed))
 
         try:
-            engine, chunk_gen = await self._hass.async_add_executor_job(
+            engine, chunk_gen, loaded_fresh = await self._hass.async_add_executor_job(
                 get_stream, self._model_key, message, speed, variation, seed
             )
         except InflectModelError as exc:
@@ -239,8 +239,12 @@ class InflectTTSEntity(TextToSpeechEntity):
                 # consumer disconnected early -- same bookkeeping the
                 # non-streaming path does after a synthesis call.
                 if engine.last_stats is not None:
+                    stats = dict(engine.last_stats)
+                    stats["cold_start_seconds"] = (
+                        engine.last_load_seconds if loaded_fresh else 0.0
+                    )
                     async_dispatcher_send(
-                        self._hass, stats_signal(self._entry_id), engine.last_stats
+                        self._hass, stats_signal(self._entry_id), stats
                     )
                 self._reschedule_idle_unload()
 

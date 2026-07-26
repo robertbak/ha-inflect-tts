@@ -28,15 +28,25 @@ _engines: dict[str, OnnxInflectEngine] = {}
 _engines_lock = threading.Lock()
 
 
-def get_engine(model_key: str) -> OnnxInflectEngine:
-    """Return the (loading, if needed) engine for a model. Blocking."""
+def _get_or_load(model_key: str) -> tuple[OnnxInflectEngine, bool]:
+    """Return (engine, loaded_fresh) -- loaded_fresh tells the caller
+    whether this call just paid the cold-start cost (e.g. after the
+    idle-unload timer freed it), so callers that report stats can
+    surface that separately from steady-state synthesis time."""
     with _engines_lock:
         engine = _engines.get(model_key)
         if engine is None:
             engine = OnnxInflectEngine(model_key, str(MODELS_DIR))
             engine.load()
             _engines[model_key] = engine
-        return engine
+            return engine, True
+        return engine, False
+
+
+def get_engine(model_key: str) -> OnnxInflectEngine:
+    """Return the (loading, if needed) engine for a model. Blocking."""
+    engine, _ = _get_or_load(model_key)
+    return engine
 
 
 def unload_engine(model_key: str) -> None:
@@ -73,9 +83,14 @@ def synthesize_with_stats(
     stats from the same engine call -- atomic with the synthesis itself,
     so there's no race with the idle-unload timer between calls.
     """
-    engine = get_engine(model_key)
+    engine, loaded_fresh = _get_or_load(model_key)
     data = engine.synthesize(text, speed=speed, variation=variation, seed=seed)
-    return data, engine.last_stats
+    stats = dict(engine.last_stats) if engine.last_stats is not None else None
+    if stats is not None:
+        stats["cold_start_seconds"] = (
+            engine.last_load_seconds if loaded_fresh else 0.0
+        )
+    return data, stats
 
 
 def get_stream(
@@ -84,9 +99,10 @@ def get_stream(
     speed: float,
     variation: float,
     seed: int,
-) -> tuple[OnnxInflectEngine, Iterator[bytes]]:
+) -> tuple[OnnxInflectEngine, Iterator[bytes], bool]:
     """Load the engine (if needed) and return it along with a ready-to
-    -iterate generator of raw PCM16 chunks. Blocking -- call via
+    -iterate generator of raw PCM16 chunks, and whether this call just
+    paid the cold-start load cost. Blocking -- call via
     hass.async_add_executor_job. The generator itself is lazy (creating
     it doesn't run any inference), so only this initial call needs the
     executor for engine loading; each subsequent chunk still needs its
@@ -96,9 +112,11 @@ def get_stream(
     The returned engine is also the caller's cue for stats: read
     engine.last_stats once the generator is exhausted.
     """
-    engine = get_engine(model_key)
-    return engine, engine.synthesize_stream(
-        text, speed=speed, variation=variation, seed=seed
+    engine, loaded_fresh = _get_or_load(model_key)
+    return (
+        engine,
+        engine.synthesize_stream(text, speed=speed, variation=variation, seed=seed),
+        loaded_fresh,
     )
 
 

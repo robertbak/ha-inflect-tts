@@ -136,6 +136,7 @@ class OnnxInflectEngine:
         self._sample_rate = 24000
         self._add_blank = True
         self.last_stats: dict[str, float | int | str] | None = None
+        self.last_load_seconds: float | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -146,6 +147,7 @@ class OnnxInflectEngine:
         return self._sample_rate
 
     def load(self) -> None:
+        start_time = time.monotonic()
         if not self._artifact_dir.exists():
             raise InflectModelError(
                 f"No exported ONNX artifacts found at {self._artifact_dir}. "
@@ -185,6 +187,13 @@ class OnnxInflectEngine:
             )
         except Exception as exc:  # noqa: BLE001
             raise InflectModelError(f"Failed to load ONNX model {self._model_key}: {exc}") from exc
+
+        self.last_load_seconds = round(time.monotonic() - start_time, 2)
+        _LOGGER.info(
+            "Loaded Inflect model %s in %.2fs (cold start)",
+            self._model_key,
+            self.last_load_seconds,
+        )
 
     def _tokens(self, text: str) -> np.ndarray:
         from text import cleaned_text_to_sequence  # noqa: E402 (frontend inserted onto sys.path)
