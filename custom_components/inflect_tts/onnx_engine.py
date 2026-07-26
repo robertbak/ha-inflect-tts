@@ -153,12 +153,29 @@ class OnnxInflectEngine:
 
             self._frontend = _import_frontend(self._artifact_dir)
 
+            sess_options = ort.SessionOptions()
+            # Default ORT spins up a thread pool sized to the core count
+            # for *each* session, plus a growing memory arena -- fine on a
+            # dev workstation but enough to OOM a Pi-class SBC once both
+            # sessions and HA's own threads are accounted for. These are
+            # small/fast graphs, so a couple of threads costs little speed.
+            sess_options.intra_op_num_threads = 2
+            sess_options.inter_op_num_threads = 1
+            sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            sess_options.enable_cpu_mem_arena = False
+            sess_options.enable_mem_pattern = False
+            sess_options.graph_optimization_level = (
+                ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+            )
+
             self._duration_sess = ort.InferenceSession(
                 str(self._artifact_dir / "duration.onnx"),
+                sess_options=sess_options,
                 providers=["CPUExecutionProvider"],
             )
             self._decode_sess = ort.InferenceSession(
                 str(self._artifact_dir / "decode.onnx"),
+                sess_options=sess_options,
                 providers=["CPUExecutionProvider"],
             )
         except Exception as exc:  # noqa: BLE001

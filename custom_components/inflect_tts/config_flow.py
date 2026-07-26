@@ -10,17 +10,21 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
 from .const import (
+    CONF_IDLE_UNLOAD_MINUTES,
     CONF_MODEL,
     CONF_SEED,
     CONF_SPEED,
     CONF_VARIATION,
+    DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_MODEL,
     DEFAULT_SEED,
     DEFAULT_SPEED,
     DEFAULT_VARIATION,
     DOMAIN,
+    MAX_IDLE_UNLOAD_MINUTES,
     MAX_SPEED,
     MAX_VARIATION,
+    MIN_IDLE_UNLOAD_MINUTES,
     MIN_SPEED,
     MIN_VARIATION,
     MODEL_NAMES,
@@ -39,6 +43,12 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
             vol.Coerce(float), vol.Range(min=MIN_VARIATION, max=MAX_VARIATION)
         ),
         vol.Optional(CONF_SEED, default=DEFAULT_SEED): vol.Coerce(int),
+        vol.Optional(
+            CONF_IDLE_UNLOAD_MINUTES, default=DEFAULT_IDLE_UNLOAD_MINUTES
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_IDLE_UNLOAD_MINUTES, max=MAX_IDLE_UNLOAD_MINUTES),
+        ),
     }
 )
 

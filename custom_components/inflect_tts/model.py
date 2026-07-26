@@ -28,6 +28,14 @@ def get_engine(model_key: str) -> OnnxInflectEngine:
     return engine
 
 
+def unload_engine(model_key: str) -> None:
+    """Drop a cached engine so its ONNX sessions can be garbage collected.
+    Call when a config entry using it is unloaded/removed -- otherwise
+    reconfiguring keeps every past session alive in memory.
+    """
+    _engines.pop(model_key, None)
+
+
 def synthesize(
     model_key: str,
     text: str,
@@ -42,4 +50,4 @@ def synthesize(
     return engine.synthesize(text, speed=speed, variation=variation, seed=seed)
 
 
-__all__ = ["InflectModelError", "get_engine", "synthesize"]
+__all__ = ["InflectModelError", "get_engine", "synthesize", "unload_engine"]
