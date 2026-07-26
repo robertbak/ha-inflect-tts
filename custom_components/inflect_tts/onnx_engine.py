@@ -135,6 +135,7 @@ class OnnxInflectEngine:
         self._frontend = None
         self._sample_rate = 24000
         self._add_blank = True
+        self.last_stats: dict[str, float | int | str] | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -202,9 +203,21 @@ class OnnxInflectEngine:
         if self._duration_sess is None or self._decode_sess is None:
             raise InflectModelError("Model is not loaded")
 
+        # np.random.RandomState requires an int seed -- callers (e.g. HA's
+        # NumberSelector-backed config options) may hand us a float.
+        speed = float(speed)
+        variation = float(variation)
+        seed = int(seed)
+
         normalized = " ".join(text.split())
         if not normalized:
             raise InflectModelError("Text must not be empty.")
+        if normalized[-1] not in ".!?;:":
+            # Without a closing punctuation cue the duration predictor has
+            # no signal that the utterance is ending, so the last word/
+            # syllable's audio gets allocated too few frames and sounds
+            # clipped. This is audio-only -- doesn't affect the caller's text.
+            normalized += "."
 
         start_time = time.monotonic()
         chunks = split_text(normalized)
@@ -266,13 +279,22 @@ class OnnxInflectEngine:
         elapsed = time.monotonic() - start_time
         audio_seconds = len(pcm16) / self._sample_rate
         rtf = elapsed / audio_seconds if audio_seconds else float("inf")
+        realtime_factor = round(1 / rtf) if rtf else 0
+        self.last_stats = {
+            "audio_seconds": round(audio_seconds, 2),
+            "synthesis_seconds": round(elapsed, 2),
+            "rtf": round(rtf, 3),
+            "realtime_factor": realtime_factor,
+            "characters": len(normalized),
+            "model": self._model_key,
+        }
         _LOGGER.info(
             "Synthesized %.1fs of audio in %.2fs (RTF %.2f, %dx realtime) "
             "for %d chars, model=%s",
             audio_seconds,
             elapsed,
             rtf,
-            round(1 / rtf) if rtf else 0,
+            realtime_factor,
             len(normalized),
             self._model_key,
         )

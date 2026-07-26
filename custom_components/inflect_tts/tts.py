@@ -10,6 +10,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers import entity_platform
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 
@@ -28,7 +30,15 @@ from .const import (
     MODEL_NAMES,
     SUPPORT_LANGUAGES,
 )
-from .model import InflectModelError, synthesize, unload_engine
+from .model import InflectModelError, get_engine, synthesize_with_stats, unload_engine
+
+SERVICE_LOAD_MODEL = "load_model"
+SERVICE_UNLOAD_MODEL = "unload_model"
+
+
+def stats_signal(entry_id: str) -> str:
+    """Dispatcher signal name carrying this entry's last-synthesis stats."""
+    return f"{DOMAIN}_{entry_id}_stats"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +51,14 @@ async def async_setup_entry(
     """Set up Inflect TTS speech component via config entry."""
     async_add_entities([InflectTTSEntity(hass, config_entry)])
 
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_LOAD_MODEL, {}, "async_load_model"
+    )
+    platform.async_register_entity_service(
+        SERVICE_UNLOAD_MODEL, {}, "async_unload_model"
+    )
+
 
 class InflectTTSEntity(TextToSpeechEntity):
     """The Inflect TTS entity."""
@@ -52,14 +70,20 @@ class InflectTTSEntity(TextToSpeechEntity):
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
         """Initialize Inflect TTS entity."""
         self._hass = hass
+        # Options (set via the options flow) override the initial setup
+        # data, so changing speed/variation/seed/idle-unload later doesn't
+        # require deleting and re-adding the integration.
+        settings = {**config_entry.data, **config_entry.options}
         self._model_key = config_entry.data[CONF_MODEL]
-        self._default_speed = config_entry.data.get(CONF_SPEED, DEFAULT_SPEED)
-        self._default_variation = config_entry.data.get(
-            CONF_VARIATION, DEFAULT_VARIATION
+        self._default_speed = float(settings.get(CONF_SPEED, DEFAULT_SPEED))
+        self._default_variation = float(
+            settings.get(CONF_VARIATION, DEFAULT_VARIATION)
         )
-        self._default_seed = config_entry.data.get(CONF_SEED, DEFAULT_SEED)
-        self._idle_unload_minutes = config_entry.data.get(
-            CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES
+        # The number selector always returns floats, but a float seed
+        # crashes numpy's RandomState -- cast explicitly.
+        self._default_seed = int(settings.get(CONF_SEED, DEFAULT_SEED))
+        self._idle_unload_minutes = int(
+            settings.get(CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES)
         )
         self._unload_timer_cancel = None
 
@@ -71,19 +95,20 @@ class InflectTTSEntity(TextToSpeechEntity):
             model=MODEL_NAMES[self._model_key],
             name=MODEL_NAMES[self._model_key],
         )
+        self._entry_id = config_entry.entry_id
 
     async def async_get_tts_audio(
         self, message: str, language: str, options: dict[str, Any]
     ) -> TtsAudioType:
         """Run in-process synthesis. Blocking work goes through the
         executor so the event loop never stalls on it."""
-        speed = options.get(CONF_SPEED, self._default_speed)
-        variation = options.get(CONF_VARIATION, self._default_variation)
-        seed = options.get(CONF_SEED, self._default_seed)
+        speed = float(options.get(CONF_SPEED, self._default_speed))
+        variation = float(options.get(CONF_VARIATION, self._default_variation))
+        seed = int(options.get(CONF_SEED, self._default_seed))
 
         try:
-            data = await self._hass.async_add_executor_job(
-                synthesize,
+            data, stats = await self._hass.async_add_executor_job(
+                synthesize_with_stats,
                 self._model_key,
                 message,
                 speed,
@@ -97,8 +122,25 @@ class InflectTTSEntity(TextToSpeechEntity):
                 translation_placeholders={"error": str(exc)},
             ) from exc
 
+        if stats is not None:
+            async_dispatcher_send(self._hass, stats_signal(self._entry_id), stats)
         self._reschedule_idle_unload()
         return "wav", data
+
+    async def async_load_model(self) -> None:
+        """Load the ONNX sessions now, ahead of the first TTS request.
+        Does not start the idle-unload timer -- the model stays resident
+        until a synthesis happens (which then governs it normally) or
+        async_unload_model is called explicitly."""
+        await self._hass.async_add_executor_job(get_engine, self._model_key)
+
+    async def async_unload_model(self) -> None:
+        """Free the ONNX sessions immediately, without waiting for the
+        idle-unload timeout."""
+        if self._unload_timer_cancel is not None:
+            self._unload_timer_cancel()
+            self._unload_timer_cancel = None
+        await self._hass.async_add_executor_job(unload_engine, self._model_key)
 
     def _reschedule_idle_unload(self) -> None:
         """(Re)start the idle-unload timer so the model isn't held in

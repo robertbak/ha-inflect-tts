@@ -7,7 +7,14 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_IDLE_UNLOAD_MINUTES,
@@ -33,28 +40,90 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_SPEED_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=MIN_SPEED, max=MAX_SPEED, step=0.05, mode=selector.NumberSelectorMode.BOX
+    )
+)
+_VARIATION_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=MIN_VARIATION,
+        max=MAX_VARIATION,
+        step=0.01,
+        mode=selector.NumberSelectorMode.BOX,
+    )
+)
+_SEED_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(step=1, mode=selector.NumberSelectorMode.BOX)
+)
+_IDLE_UNLOAD_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=MIN_IDLE_UNLOAD_MINUTES,
+        max=MAX_IDLE_UNLOAD_MINUTES,
+        step=1,
+        mode=selector.NumberSelectorMode.BOX,
+    )
+)
+
+
+def _tuning_fields(current: dict[str, Any]) -> dict[Any, Any]:
+    """Speed/variation/seed/idle-unload fields, shared between the initial
+    setup form and the options form."""
+    return {
+        vol.Optional(
+            CONF_SPEED, default=current.get(CONF_SPEED, DEFAULT_SPEED)
+        ): _SPEED_SELECTOR,
+        vol.Optional(
+            CONF_VARIATION, default=current.get(CONF_VARIATION, DEFAULT_VARIATION)
+        ): _VARIATION_SELECTOR,
+        vol.Optional(
+            CONF_SEED, default=current.get(CONF_SEED, DEFAULT_SEED)
+        ): _SEED_SELECTOR,
+        vol.Optional(
+            CONF_IDLE_UNLOAD_MINUTES,
+            default=current.get(
+                CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES
+            ),
+        ): _IDLE_UNLOAD_SELECTOR,
+    }
+
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_MODEL, default=DEFAULT_MODEL): vol.In(MODEL_NAMES),
-        vol.Optional(CONF_SPEED, default=DEFAULT_SPEED): vol.All(
-            vol.Coerce(float), vol.Range(min=MIN_SPEED, max=MAX_SPEED)
-        ),
-        vol.Optional(CONF_VARIATION, default=DEFAULT_VARIATION): vol.All(
-            vol.Coerce(float), vol.Range(min=MIN_VARIATION, max=MAX_VARIATION)
-        ),
-        vol.Optional(CONF_SEED, default=DEFAULT_SEED): vol.Coerce(int),
-        vol.Optional(
-            CONF_IDLE_UNLOAD_MINUTES, default=DEFAULT_IDLE_UNLOAD_MINUTES
-        ): vol.All(
-            vol.Coerce(int),
-            vol.Range(min=MIN_IDLE_UNLOAD_MINUTES, max=MAX_IDLE_UNLOAD_MINUTES),
-        ),
+        **_tuning_fields({}),
     }
 )
 
 
+def _options_schema(current: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(_tuning_fields(current))
+
+
+class InflectTTSOptionsFlow(OptionsFlow):
+    """Handle options (speed/variation/seed/idle-unload) after setup --
+    the model itself isn't editable here since changing it would collide
+    with the uniqueness check in the initial config flow."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current = {**self.config_entry.data, **self.config_entry.options}
+        return self.async_show_form(
+            step_id="init", data_schema=_options_schema(current)
+        )
+
+
 class InflectTTSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Inflect TTS."""
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> InflectTTSOptionsFlow:
+        return InflectTTSOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

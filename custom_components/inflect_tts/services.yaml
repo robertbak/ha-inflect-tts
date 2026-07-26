@@ -1,0 +1,11 @@
+load_model:
+  target:
+    entity:
+      domain: tts
+      integration: inflect_tts
+
+unload_model:
+  target:
+    entity:
+      domain: tts
+      integration: inflect_tts

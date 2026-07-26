@@ -12,20 +12,30 @@ copied from what the sidecar's own export stage produces -- see
 
 from __future__ import annotations
 
+import threading
+
 from .const import MODELS_DIR
 from .onnx_engine import InflectModelError, OnnxInflectEngine
 
 _engines: dict[str, OnnxInflectEngine] = {}
+# Guards check-then-load in get_engine and pop in unload_engine -- without
+# it, two near-simultaneous first requests (or a request racing the
+# idle-unload timer) could double-load or unload out from under an
+# in-flight load. Only held around the dict/load bookkeeping, never
+# around engine.synthesize() itself, so concurrent synthesis calls on an
+# already-loaded engine still run unserialized.
+_engines_lock = threading.Lock()
 
 
 def get_engine(model_key: str) -> OnnxInflectEngine:
     """Return the (loading, if needed) engine for a model. Blocking."""
-    engine = _engines.get(model_key)
-    if engine is None:
-        engine = OnnxInflectEngine(model_key, str(MODELS_DIR))
-        engine.load()
-        _engines[model_key] = engine
-    return engine
+    with _engines_lock:
+        engine = _engines.get(model_key)
+        if engine is None:
+            engine = OnnxInflectEngine(model_key, str(MODELS_DIR))
+            engine.load()
+            _engines[model_key] = engine
+        return engine
 
 
 def unload_engine(model_key: str) -> None:
@@ -33,7 +43,8 @@ def unload_engine(model_key: str) -> None:
     Call when a config entry using it is unloaded/removed -- otherwise
     reconfiguring keeps every past session alive in memory.
     """
-    _engines.pop(model_key, None)
+    with _engines_lock:
+        _engines.pop(model_key, None)
 
 
 def synthesize(
@@ -50,4 +61,26 @@ def synthesize(
     return engine.synthesize(text, speed=speed, variation=variation, seed=seed)
 
 
-__all__ = ["InflectModelError", "get_engine", "synthesize", "unload_engine"]
+def synthesize_with_stats(
+    model_key: str,
+    text: str,
+    speed: float,
+    variation: float,
+    seed: int,
+) -> tuple[bytes, dict]:
+    """Same as synthesize(), but also returns the last-synthesis timing
+    stats from the same engine call -- atomic with the synthesis itself,
+    so there's no race with the idle-unload timer between calls.
+    """
+    engine = get_engine(model_key)
+    data = engine.synthesize(text, speed=speed, variation=variation, seed=seed)
+    return data, engine.last_stats
+
+
+__all__ = [
+    "InflectModelError",
+    "get_engine",
+    "synthesize",
+    "synthesize_with_stats",
+    "unload_engine",
+]

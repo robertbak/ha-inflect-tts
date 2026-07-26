@@ -14,7 +14,27 @@
           "model": "Model",
           "speed": "Default speed",
           "variation": "Default variation",
-          "seed": "Default seed"
+          "seed": "Default seed",
+          "idle_unload_minutes": "Idle unload (minutes)"
+        },
+        "data_description": {
+          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Inflect TTS options",
+        "data": {
+          "speed": "Default speed",
+          "variation": "Default variation",
+          "seed": "Default seed",
+          "idle_unload_minutes": "Idle unload (minutes)"
+        },
+        "data_description": {
+          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently."
         }
       }
     }
@@ -22,6 +42,16 @@
   "exceptions": {
     "synthesis_error": {
       "message": "Failed to synthesize speech: {error}"
+    }
+  },
+  "services": {
+    "load_model": {
+      "name": "Load model",
+      "description": "Loads the ONNX model now, ahead of the first request. Useful for pre-warming before a scripted announcement."
+    },
+    "unload_model": {
+      "name": "Unload model",
+      "description": "Frees the ONNX model from memory immediately, without waiting for the idle-unload timeout."
     }
   }
 }

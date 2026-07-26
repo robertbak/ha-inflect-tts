@@ -288,6 +288,12 @@ def _configure_espeak() -> None:
     if _ESPEAK_CONFIGURED:
         return
 
+    # phonemizer's espeak backend logs a "words count mismatch" warning
+    # whenever espeak expands/contracts word counts during phonemization
+    # (numbers, abbreviations, unusual punctuation) -- routine and
+    # non-fatal, but shows up in HA's log viewer looking like an error.
+    logging.getLogger("phonemizer").setLevel(logging.ERROR)
+
     # HA's official container is Alpine (musl libc); on real installs
     # (HACS/HAOS) users can't `apk add` a system package persistently --
     # the core container is rebuilt from the stock image on every update.
