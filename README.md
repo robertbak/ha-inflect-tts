@@ -36,6 +36,14 @@ Pick a model (Nano or Micro) and, optionally, default speed/variation/seed.
 Everything the integration needs is installed automatically on first load --
 no extra setup steps.
 
+Audio streams sentence-by-sentence as it's generated, so playback can start
+before a long message has finished synthesizing -- but only on players that
+actually support progressive playback of a streamed audio response (e.g.
+Google Cast). Some players (notably Sonos) fully buffer the response before
+playing anything, so you won't see any benefit there -- you'll still wait
+for the whole message either way. Test with a Cast device if you want to
+see streaming actually working.
+
 ## Credits
 
 This integration is a Home Assistant wrapper around the **Inflect** text-to-speech
