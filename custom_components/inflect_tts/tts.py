@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import queue as sync_queue
 import struct
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -43,7 +43,7 @@ from .const import (
     MAX_STREAM_READ_AHEAD,
     MODEL_NAMES,
     SUPPORT_LANGUAGES,
-    _AUTO_READ_AHEAD_TARGET,
+    _AUTO_READ_AHEAD_TARGET_SECONDS,
 )
 from .model import (
     InflectModelError,
@@ -91,23 +91,62 @@ def _streaming_wav_header(
     )
 
 
+_BYTES_PER_SAMPLE = 2  # 16-bit PCM
+
+
+class _AheadTracker:
+    """Paces the producer thread by seconds of buffered *audio*, not
+    chunk count -- a 10s sentence and ten 1s sentences shouldn't count
+    the same. Every PCM chunk's exact duration is free to compute
+    (len(chunk) / bytes_per_sample / sample_rate), so this is just
+    tracking that running total: the producer blocks once it's built up
+    target_seconds of unconsumed audio, and wakes up again as the
+    consumer hands chunks off (removes them from the tally). The first
+    chunk is never delayed -- the tally starts at 0.
+    """
+
+    def __init__(self, target_seconds: float) -> None:
+        self._target_seconds = target_seconds
+        self._buffered_seconds = 0.0
+        self._condition = threading.Condition()
+
+    def wait_for_room(self) -> None:
+        with self._condition:
+            while self._buffered_seconds >= self._target_seconds:
+                self._condition.wait()
+
+    def add(self, seconds: float) -> None:
+        with self._condition:
+            self._buffered_seconds += seconds
+            self._condition.notify_all()
+
+    def remove(self, seconds: float) -> None:
+        with self._condition:
+            self._buffered_seconds = max(0.0, self._buffered_seconds - seconds)
+            self._condition.notify_all()
+
+
 def _drain_chunks_into_queue(
-    chunk_gen: Iterator[bytes], out_queue: sync_queue.Queue
+    chunk_gen: Iterator[bytes],
+    out_queue: sync_queue.Queue,
+    ahead: _AheadTracker,
+    sample_rate: int,
 ) -> None:
     """Runs in a background executor thread for the whole stream's
     duration (not per-chunk), continuously pulling chunks from the
-    blocking generator and pushing them into a bounded queue. This is
-    what actually gives us read-ahead: since this thread keeps running
-    while the consumer is busy handing a chunk off to HA/the network,
-    synthesis of the NEXT sentence overlaps with transmission of the
-    current one instead of only starting once the consumer asks for it.
-    queue.Queue.put() blocks once the queue is full, which is exactly
-    the backpressure we want -- this thread won't race arbitrarily far
-    ahead of what's actually been consumed.
+    blocking generator and pushing them into an (unbounded -- pacing is
+    ahead's job, not the queue's) queue. This is what actually gives us
+    read-ahead: since this thread keeps running while the consumer is
+    busy handing a chunk off to HA/the network, synthesis of the NEXT
+    sentence overlaps with transmission of the current one instead of
+    only starting once the consumer asks for it.
     """
     try:
         for chunk in chunk_gen:
-            out_queue.put(chunk)
+            ahead.wait_for_room()
+            duration = len(chunk) / _BYTES_PER_SAMPLE / sample_rate
+            out_queue.put((chunk, duration))
+            ahead.add(duration)
     except InflectModelError as exc:
         out_queue.put(exc)
     except Exception as exc:  # noqa: BLE001
@@ -116,23 +155,24 @@ def _drain_chunks_into_queue(
         out_queue.put(_STREAM_DONE)
 
 
-def _auto_read_ahead(engine: OnnxInflectEngine) -> int:
-    """Compute a read-ahead depth from the last measured synthesis
-    speed for this engine (same number the "Synthesis speed" sensor
-    shows), instead of a fixed config value. A comfortably fast engine
-    (high realtime_factor) needs little to no read-ahead; one running
-    close to real-time needs more slack to absorb timing variance.
-    Falls back to the same default as a fixed config when there's no
-    prior measurement yet (e.g. the very first stream after startup).
+def _auto_read_ahead_seconds(engine: OnnxInflectEngine) -> float:
+    """Compute a read-ahead target (seconds of buffered audio) from the
+    last measured synthesis speed for this engine (same number the
+    "Synthesis speed" sensor shows), instead of a fixed config value. A
+    comfortably fast engine (high realtime_factor) needs little to no
+    read-ahead; one running close to (or slower than) real-time needs
+    more slack to absorb timing variance. Falls back to a conservative
+    default when there's no prior measurement yet (e.g. the very first
+    stream after startup).
     """
     realtime_factor = (engine.last_stats or {}).get("realtime_factor")
     if not realtime_factor or realtime_factor <= 0:
-        return 2
+        return _AUTO_READ_AHEAD_TARGET_SECONDS
     return max(
-        1,
+        0.5,
         min(
             MAX_STREAM_READ_AHEAD,
-            math.ceil(_AUTO_READ_AHEAD_TARGET / realtime_factor),
+            _AUTO_READ_AHEAD_TARGET_SECONDS / realtime_factor,
         ),
     )
 
@@ -187,10 +227,14 @@ class InflectTTSEntity(TextToSpeechEntity):
             settings.get(CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES)
         )
         self._streaming = bool(settings.get(CONF_STREAMING, DEFAULT_STREAMING))
-        # 0 = auto (compute from last measured synthesis speed each
-        # stream); any other value is used as a fixed read-ahead depth.
-        self._stream_read_ahead = max(
-            0, int(settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD))
+        # 0 = auto (compute seconds of read-ahead from last measured
+        # synthesis speed each stream); any other value is a fixed
+        # target in seconds of buffered audio.
+        self._stream_read_ahead_seconds = max(
+            0.0,
+            float(
+                settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD)
+            ),
         )
         self._unload_timer_cancel = None
 
@@ -284,10 +328,13 @@ class InflectTTSEntity(TextToSpeechEntity):
             # we've finished transmitting the current chunk. On hardware
             # running close to real-time, that overlap is what prevents
             # an audible gap between sentences.
-            read_ahead = self._stream_read_ahead or _auto_read_ahead(engine)
-            out_queue: sync_queue.Queue = sync_queue.Queue(maxsize=read_ahead)
+            read_ahead_seconds = (
+                self._stream_read_ahead_seconds or _auto_read_ahead_seconds(engine)
+            )
+            ahead = _AheadTracker(read_ahead_seconds)
+            out_queue: sync_queue.Queue = sync_queue.Queue()
             self._hass.async_add_executor_job(
-                _drain_chunks_into_queue, chunk_gen, out_queue
+                _drain_chunks_into_queue, chunk_gen, out_queue, ahead, engine.sample_rate
             )
             try:
                 yield _streaming_wav_header(engine.sample_rate)
@@ -301,7 +348,9 @@ class InflectTTSEntity(TextToSpeechEntity):
                             translation_key="synthesis_error",
                             translation_placeholders={"error": str(item)},
                         ) from item
-                    yield item
+                    chunk, duration = item
+                    yield chunk
+                    ahead.remove(duration)
             finally:
                 # Runs whether the stream finished, errored, or the
                 # consumer disconnected early -- same bookkeeping the

@@ -74,7 +74,7 @@ _STREAM_READ_AHEAD_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(
         min=MIN_STREAM_READ_AHEAD,
         max=MAX_STREAM_READ_AHEAD,
-        step=1,
+        step=0.5,
         mode=selector.NumberSelectorMode.BOX,
     )
 )

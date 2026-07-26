@@ -46,15 +46,17 @@ DEFAULT_IDLE_UNLOAD_MINUTES = 10
 # buffered (whole-message) behavior if streaming misbehaves with a given
 # media player or with HA's own TTS caching.
 DEFAULT_STREAMING = True
-# How many sentence chunks a background thread is allowed to synthesize
-# ahead of what's actually been sent to the consumer, while streaming.
-# Higher smooths over more variance in per-sentence synthesis time
-# (helps avoid audible gaps between sentences on slower hardware) at the
-# cost of a bit more memory held at once; 1 means "no read-ahead, purely
-# on-demand" (matches pre-0.9 behavior). 0 means "auto": compute it from
-# the last measured synthesis speed (the "Synthesis speed" sensor) each
-# time a stream starts, instead of a fixed number -- self-tunes to
-# whatever hardware this actually is without manual tuning.
+# How many SECONDS of already-synthesized-but-not-yet-sent audio a
+# background thread is allowed to build up ahead of the consumer, while
+# streaming -- seconds rather than a sentence count, since sentences
+# vary wildly in duration (a 1s "Yes." and a 10s sentence shouldn't
+# count the same). Higher smooths over more variance in per-sentence
+# synthesis time (helps avoid audible gaps on slower hardware) at the
+# cost of a bit more memory/latency held at once. This never delays the
+# very first chunk -- the buffer starts empty, so the first sentence
+# always flows straight through. 0 means "auto": compute it from the
+# last measured synthesis speed (the "Synthesis speed" sensor) each
+# time a stream starts, instead of a fixed number.
 DEFAULT_STREAM_READ_AHEAD = 0
 
 MIN_SPEED = 0.5
@@ -63,11 +65,12 @@ MIN_VARIATION = 0.0
 MAX_VARIATION = 1.0
 MIN_IDLE_UNLOAD_MINUTES = 0
 MAX_IDLE_UNLOAD_MINUTES = 240
-MIN_STREAM_READ_AHEAD = 0
-MAX_STREAM_READ_AHEAD = 10
-# realtime_factor this comfortable read-ahead formula targets -- see
+MIN_STREAM_READ_AHEAD = 0.0
+MAX_STREAM_READ_AHEAD = 30.0
+# Baseline seconds-of-buffer target the auto read-ahead formula aims
+# for at 1x realtime, scaled by 1/realtime_factor -- see
 # tts.py's _auto_read_ahead().
-_AUTO_READ_AHEAD_TARGET = 4.0
+_AUTO_READ_AHEAD_TARGET_SECONDS = 3.0
 
 SUPPORT_LANGUAGES = ["en-US"]
 DEFAULT_LANG = "en-US"
