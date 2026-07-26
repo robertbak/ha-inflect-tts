@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import queue as sync_queue
 import struct
 from collections.abc import Iterator
@@ -39,11 +40,14 @@ from .const import (
     DEFAULT_STREAMING,
     DEFAULT_VARIATION,
     DOMAIN,
+    MAX_STREAM_READ_AHEAD,
     MODEL_NAMES,
     SUPPORT_LANGUAGES,
+    _AUTO_READ_AHEAD_TARGET,
 )
 from .model import (
     InflectModelError,
+    OnnxInflectEngine,
     get_engine,
     get_stream,
     synthesize_with_stats,
@@ -112,6 +116,27 @@ def _drain_chunks_into_queue(
         out_queue.put(_STREAM_DONE)
 
 
+def _auto_read_ahead(engine: OnnxInflectEngine) -> int:
+    """Compute a read-ahead depth from the last measured synthesis
+    speed for this engine (same number the "Synthesis speed" sensor
+    shows), instead of a fixed config value. A comfortably fast engine
+    (high realtime_factor) needs little to no read-ahead; one running
+    close to real-time needs more slack to absorb timing variance.
+    Falls back to the same default as a fixed config when there's no
+    prior measurement yet (e.g. the very first stream after startup).
+    """
+    realtime_factor = (engine.last_stats or {}).get("realtime_factor")
+    if not realtime_factor or realtime_factor <= 0:
+        return 2
+    return max(
+        1,
+        min(
+            MAX_STREAM_READ_AHEAD,
+            math.ceil(_AUTO_READ_AHEAD_TARGET / realtime_factor),
+        ),
+    )
+
+
 def stats_signal(entry_id: str) -> str:
     """Dispatcher signal name carrying this entry's last-synthesis stats."""
     return f"{DOMAIN}_{entry_id}_stats"
@@ -162,11 +187,10 @@ class InflectTTSEntity(TextToSpeechEntity):
             settings.get(CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES)
         )
         self._streaming = bool(settings.get(CONF_STREAMING, DEFAULT_STREAMING))
+        # 0 = auto (compute from last measured synthesis speed each
+        # stream); any other value is used as a fixed read-ahead depth.
         self._stream_read_ahead = max(
-            1,
-            int(
-                settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD)
-            ),
+            0, int(settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD))
         )
         self._unload_timer_cancel = None
 
@@ -260,9 +284,8 @@ class InflectTTSEntity(TextToSpeechEntity):
             # we've finished transmitting the current chunk. On hardware
             # running close to real-time, that overlap is what prevents
             # an audible gap between sentences.
-            out_queue: sync_queue.Queue = sync_queue.Queue(
-                maxsize=self._stream_read_ahead
-            )
+            read_ahead = self._stream_read_ahead or _auto_read_ahead(engine)
+            out_queue: sync_queue.Queue = sync_queue.Queue(maxsize=read_ahead)
             self._hass.async_add_executor_job(
                 _drain_chunks_into_queue, chunk_gen, out_queue
             )

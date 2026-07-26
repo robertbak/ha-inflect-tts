@@ -27,7 +27,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the diagnostic sensors via config entry."""
     async_add_entities(
-        [InflectTTSSpeedSensor(config_entry), InflectTTSColdStartSensor(config_entry)]
+        [InflectTTSSpeedSensor(config_entry), InflectTTSModelLoadTimeSensor(config_entry)]
     )
 
 
@@ -89,15 +89,18 @@ class InflectTTSSpeedSensor(_InflectTTSStatsSensor):
         self.async_write_ha_state()
 
 
-class InflectTTSColdStartSensor(_InflectTTSStatsSensor):
+class InflectTTSModelLoadTimeSensor(_InflectTTSStatsSensor):
     """How long the most recent request spent loading the ONNX sessions
     before synthesis could even start -- 0 on a warm request (the model
     was already resident), positive right after the idle-unload timer
     (or a fresh HA start) freed it and a new request had to reload it.
-    Useful for telling "synthesis is slow" apart from "cold start is
-    what's slow" on constrained hardware."""
+    Useful for telling "synthesis is slow" apart from "loading the model
+    is what's slow" on constrained hardware."""
 
-    _name_suffix = "cold start time"
+    _name_suffix = "model load time"
+    # Kept as-is (not renamed to match the class) so existing dashboards/
+    # automations referencing this entity by unique_id/entity_id aren't
+    # orphaned by what's otherwise just a display-name change.
     _unique_id_suffix = "cold_start_seconds"
 
     _attr_device_class = SensorDeviceClass.DURATION

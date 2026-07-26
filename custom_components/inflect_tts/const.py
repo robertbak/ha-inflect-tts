@@ -51,8 +51,11 @@ DEFAULT_STREAMING = True
 # Higher smooths over more variance in per-sentence synthesis time
 # (helps avoid audible gaps between sentences on slower hardware) at the
 # cost of a bit more memory held at once; 1 means "no read-ahead, purely
-# on-demand" (matches pre-0.9 behavior).
-DEFAULT_STREAM_READ_AHEAD = 2
+# on-demand" (matches pre-0.9 behavior). 0 means "auto": compute it from
+# the last measured synthesis speed (the "Synthesis speed" sensor) each
+# time a stream starts, instead of a fixed number -- self-tunes to
+# whatever hardware this actually is without manual tuning.
+DEFAULT_STREAM_READ_AHEAD = 0
 
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0
@@ -60,8 +63,11 @@ MIN_VARIATION = 0.0
 MAX_VARIATION = 1.0
 MIN_IDLE_UNLOAD_MINUTES = 0
 MAX_IDLE_UNLOAD_MINUTES = 240
-MIN_STREAM_READ_AHEAD = 1
+MIN_STREAM_READ_AHEAD = 0
 MAX_STREAM_READ_AHEAD = 10
+# realtime_factor this comfortable read-ahead formula targets -- see
+# tts.py's _auto_read_ahead().
+_AUTO_READ_AHEAD_TARGET = 4.0
 
 SUPPORT_LANGUAGES = ["en-US"]
 DEFAULT_LANG = "en-US"
