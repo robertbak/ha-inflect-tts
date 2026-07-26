@@ -254,7 +254,13 @@ class OnnxInflectEngine:
         elapsed = time.monotonic() - start_time
         audio_seconds = total_samples / self._sample_rate
         rtf = elapsed / audio_seconds if audio_seconds else float("inf")
-        realtime_factor = round(1 / rtf) if rtf else 0
+        # A plain round(1/rtf) to an int collapses anything from ~0.67x to
+        # ~2x realtime down to a single displayed "1" -- much too coarse
+        # to tell "comfortably real-time" apart from "borderline slow".
+        # Two decimal places actually distinguishes Nano from Micro (and
+        # catches genuinely-slower-than-real-time synthesis, which would
+        # otherwise misleadingly still read "1x").
+        realtime_factor = round(1 / rtf, 2) if rtf else 0.0
         self.last_stats = {
             "audio_seconds": round(audio_seconds, 2),
             "synthesis_seconds": round(elapsed, 2),
@@ -264,7 +270,7 @@ class OnnxInflectEngine:
             "model": self._model_key,
         }
         _LOGGER.info(
-            "Synthesized %.1fs of audio in %.2fs (RTF %.2f, %dx realtime) "
+            "Synthesized %.1fs of audio in %.2fs (RTF %.2f, %.2fx realtime) "
             "for %d chars, model=%s",
             audio_seconds,
             elapsed,

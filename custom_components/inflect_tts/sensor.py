@@ -3,7 +3,7 @@ it's visible in the UI/history/dashboards instead of only in the logs."""
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -31,6 +31,8 @@ class InflectTTSSpeedSensor(SensorEntity):
     _attr_native_unit_of_measurement = "x realtime"
     _attr_icon = "mdi:speedometer"
     _attr_should_poll = False
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         model_key = config_entry.data[CONF_MODEL]
