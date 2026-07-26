@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import re
+import tempfile
+import threading
 from dataclasses import dataclass
 
+import inflect_nano_v2_frontend as _frontend_module
 from inflect_nano_v2_frontend import _configure_espeak, normalize_text
+
+# Guards the temporary tempfile.tempdir override below -- HA can run
+# multiple synthesis requests concurrently on different executor
+# threads, and tempfile.tempdir is global process state, so two
+# overlapping calls could otherwise restore each other's value early.
+_TEMPDIR_OVERRIDE_LOCK = threading.Lock()
 
 
 # eSpeak is the general fallback. This table contains verified exceptions only;
@@ -37,15 +46,28 @@ def phonemize_normalized_batch(normalized_texts: list[str], *, jobs: int = 1) ->
     _configure_espeak()
     from phonemizer import phonemize
 
-    phoneme_texts = phonemize(
-        normalized_texts,
-        language="en-us",
-        backend="espeak",
-        strip=True,
-        preserve_punctuation=True,
-        with_stress=True,
-        njobs=jobs,
-    )
+    # Narrow, restore-after-use override: phonemizer's EspeakAPI copies
+    # the espeak library into a fresh tempfile.mkdtemp() dir on backend
+    # construction, which needs an exec-permitted directory on HAOS (see
+    # ESPEAK_TMP_DIR's definition in inflect_nano_v2_frontend.py for why
+    # this must NOT be a permanent global override).
+    with _TEMPDIR_OVERRIDE_LOCK:
+        previous_tempdir = tempfile.tempdir
+        if _frontend_module.ESPEAK_TMP_DIR:
+            tempfile.tempdir = _frontend_module.ESPEAK_TMP_DIR
+        try:
+            phoneme_texts = phonemize(
+                normalized_texts,
+                language="en-us",
+                backend="espeak",
+                strip=True,
+                preserve_punctuation=True,
+                with_stress=True,
+                njobs=jobs,
+            )
+        finally:
+            tempfile.tempdir = previous_tempdir
+
     return [_apply_phoneme_overrides(text) for text in phoneme_texts]
 
 

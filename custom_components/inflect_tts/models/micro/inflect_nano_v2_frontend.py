@@ -108,6 +108,11 @@ PUNCT_TRANSLATION = str.maketrans(
 
 _ESPEAK_CONFIGURED = False
 _ESPEAK_BACKEND = None
+# Exec-permitted directory for phonemizer's espeak-library temp copy --
+# set by _configure_espeak(), consumed narrowly (never left as a
+# permanent tempfile.tempdir override) by phonemize_normalized_batch()
+# in inflect_vits_frontend.py.
+ESPEAK_TMP_DIR: str | None = None
 
 
 @dataclass
@@ -312,25 +317,27 @@ def _configure_espeak() -> None:
     # needs its own copy) -- and on real HA installs (HAOS) /tmp is
     # commonly mounted noexec, so dlopen-ing that copy fails with
     # "Operation not permitted" even though the original bundled path
-    # loads fine. Point TMPDIR at a directory inside this integration
-    # instead, which we already know permits exec.
+    # loads fine. We point tempfile.tempdir at a directory inside this
+    # integration for that one copy, since we know it permits exec.
+    #
+    # IMPORTANT: this must NOT be a permanent global override. tempfile
+    # .tempdir affects the whole HA process, including HACS's own
+    # tempfile.mkdtemp() calls when it downloads/stages an update -- and
+    # since our directory lives inside custom_components/inflect_tts/,
+    # HACS deleting that folder mid-update (to replace it with the new
+    # version) would yank the ground out from under its own in-progress
+    # temp files, breaking updates for this integration ("temp path not
+    # available" errors). So we only expose the path here; the actual
+    # narrow, restore-after-use override happens around the one call
+    # site that needs it, in inflect_vits_frontend.phonemize_normalized_batch().
     integration_root = Path(__file__).parent.parent.parent
+    global ESPEAK_TMP_DIR
     espeak_tmp_dir = integration_root / "tmp"
     try:
         espeak_tmp_dir.mkdir(exist_ok=True)
-        # Setting os.environ["TMPDIR"] alone isn't enough: (1) a long-
-        # running HA process almost always calls tempfile before this
-        # code ever runs, and tempfile resolves + caches its default dir
-        # exactly once (lazily, on first use) -- an env change afterward
-        # is invisible to it; (2) even on a first call, HA's own
-        # container commonly exports TMPDIR=/tmp already, which
-        # setdefault() would then just leave alone. Overriding the
-        # module attribute directly sidesteps both.
-        import tempfile
-
-        tempfile.tempdir = str(espeak_tmp_dir)
+        ESPEAK_TMP_DIR = str(espeak_tmp_dir)
     except OSError:
-        pass
+        ESPEAK_TMP_DIR = None
 
     system_libraries = (
         Path("/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1"),
