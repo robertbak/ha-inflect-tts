@@ -15,10 +15,12 @@
           "speed": "Default speed",
           "variation": "Default variation",
           "seed": "Default seed",
-          "idle_unload_minutes": "Idle unload (minutes)"
+          "idle_unload_minutes": "Idle unload (minutes)",
+          "streaming": "Streaming synthesis"
         },
         "data_description": {
-          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently."
+          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently.",
+          "streaming": "Stream audio sentence-by-sentence as it's generated, so playback can start before a long message finishes synthesizing. Turn off to fall back to generating the whole message before returning any audio, if streaming causes issues with your media player."
         }
       }
     }
@@ -31,10 +33,12 @@
           "speed": "Default speed",
           "variation": "Default variation",
           "seed": "Default seed",
-          "idle_unload_minutes": "Idle unload (minutes)"
+          "idle_unload_minutes": "Idle unload (minutes)",
+          "streaming": "Streaming synthesis"
         },
         "data_description": {
-          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently."
+          "idle_unload_minutes": "Free the model from memory after this many minutes without a request. Set to 0 to keep it loaded permanently.",
+          "streaming": "Stream audio sentence-by-sentence as it's generated, so playback can start before a long message finishes synthesizing. Turn off to fall back to generating the whole message before returning any audio, if streaming causes issues with your media player."
         }
       }
     }

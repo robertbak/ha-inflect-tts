@@ -26,11 +26,13 @@ from .const import (
     CONF_MODEL,
     CONF_SEED,
     CONF_SPEED,
+    CONF_STREAMING,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_LANG,
     DEFAULT_SEED,
     DEFAULT_SPEED,
+    DEFAULT_STREAMING,
     DEFAULT_VARIATION,
     DOMAIN,
     MODEL_NAMES,
@@ -130,6 +132,7 @@ class InflectTTSEntity(TextToSpeechEntity):
         self._idle_unload_minutes = int(
             settings.get(CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES)
         )
+        self._streaming = bool(settings.get(CONF_STREAMING, DEFAULT_STREAMING))
         self._unload_timer_cancel = None
 
         self._attr_name = MODEL_NAMES[self._model_key]
@@ -178,8 +181,25 @@ class InflectTTSEntity(TextToSpeechEntity):
         """Stream audio sentence-by-sentence as it's generated, instead
         of waiting for the whole message to finish synthesizing before
         returning anything -- same per-sentence chunking approach used
-        for streaming in the companion web app."""
+        for streaming in the companion web app.
+
+        HA always calls this (there's no per-request choice for the end
+        user), so the "Streaming synthesis" option is the escape hatch:
+        when disabled, fall back to the same buffered behavior as
+        async_get_tts_audio, just wrapped as a single-item stream.
+        """
         message = "".join([chunk async for chunk in request.message_gen])
+
+        if not self._streaming:
+            extension, data = await self.async_get_tts_audio(
+                message, request.language, request.options
+            )
+
+            async def single_chunk():
+                yield data
+
+            return TTSAudioResponse(extension, single_chunk())
+
         speed = float(request.options.get(CONF_SPEED, self._default_speed))
         variation = float(
             request.options.get(CONF_VARIATION, self._default_variation)
