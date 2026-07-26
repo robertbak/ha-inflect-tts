@@ -44,6 +44,14 @@ playing anything, so you won't see any benefit there -- you'll still wait
 for the whole message either way. Test with a Cast device if you want to
 see streaming actually working.
 
+## Development
+
+```
+pip install -r requirements_test.txt
+pip install onnxruntime phonemizer num2words Unidecode dlinfo
+pytest tests/
+```
+
 ## Credits
 
 This integration is a Home Assistant wrapper around the **Inflect** text-to-speech

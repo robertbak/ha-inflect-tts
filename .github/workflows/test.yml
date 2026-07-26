@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install espeak-ng (system dependency for phonemization)
+        run: sudo apt-get update && sudo apt-get install -y espeak-ng
+
+      - name: Install test + runtime dependencies
+        run: |
+          pip install -r requirements_test.txt
+          # onnxruntime is deliberately not in manifest.json's requirements
+          # (installed at runtime from our own musllinux wheel index, see
+          # custom_components/inflect_tts/onnxruntime_install.py) -- for
+          # CI on a normal glibc runner, the plain PyPI wheel is fine.
+          pip install onnxruntime phonemizer num2words Unidecode dlinfo
+
+      - name: Run tests
+        run: pytest tests/ -v
