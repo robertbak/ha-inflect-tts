@@ -1,21 +1,19 @@
 # Inflect TTS for Home Assistant
 
-A local, in-process [Text-to-speech](https://www.home-assistant.io/integrations/tts/)
-integration for Home Assistant using the
-[Inflect Micro/Nano v2](https://huggingface.co/owensong/Inflect-Nano-v2)
-models, exported to ONNX. Runs directly inside Home Assistant -- no sidecar
-container, no torch, no cloud calls.
+A local [text-to-speech](https://www.home-assistant.io/integrations/tts/)
+integration for Home Assistant. Runs fully on-device -- no cloud calls, no
+internet dependency, no API keys.
 
-## Why ONNX instead of torch
+## What you get
 
-Home Assistant's official container images are Alpine Linux (musl libc).
-`torch` has no musllinux wheel and is impractical to build on musl (hard
-dependency on MKL, which is glibc-only). `onnxruntime` has no official
-musllinux wheel either, but unlike torch it's practical to build from
-source -- see
-[robertbak/onnxruntime-musllinux-wheels](https://github.com/robertbak/onnxruntime-musllinux-wheels)
-for prebuilt wheels (x86_64 + aarch64) and the build scripts. This
-integration installs the right one automatically the first time it loads.
+- Two voices to choose from: **Nano** (smaller and faster) and **Micro**
+  (higher quality)
+- Adjustable speed, variation, and seed, either as defaults or per TTS call
+- A diagnostic sensor showing how fast synthesis is running on your hardware
+- `load_model` / `unload_model` actions to pre-warm or free the model on
+  demand, and an automatic idle-unload timer to keep memory use low on
+  low-end hardware like a Raspberry Pi
+- Works on both x86_64 and ARM installs
 
 ## Installation
 
@@ -28,32 +26,21 @@ integration installs the right one automatically the first time it loads.
 
 ### Manual
 
-Copy `custom_components/inflect_tts` into your Home Assistant `config/custom_components/`
-directory, restart, then add the integration as above.
+Copy `custom_components/inflect_tts` into your Home Assistant
+`config/custom_components/` directory, restart, then add the integration
+as above.
 
 ## Setup
 
-Pick a model (Nano is smaller/faster, Micro is higher quality), and
-optionally set default speed/variation/seed -- these can be overridden
-per-call via TTS options. The first load installs `onnxruntime` (see
-above) and installs the plain-Python dependencies (`numpy`, `phonemizer`,
-etc.) from PyPI as usual.
+Pick a model (Nano or Micro) and, optionally, default speed/variation/seed.
+Everything the integration needs is installed automatically on first load --
+no extra setup steps.
 
-Text-to-phoneme conversion needs `espeak-ng`, a system-level dependency
-that neither HACS nor pip can install -- and on real HA installs (HACS/HAOS)
-there's no supported way to `apk add` something into the core container
-persistently anyway, since it's rebuilt from the stock image on every
-update. So a musl-built `libespeak-ng.so` (extracted from Alpine's own
-package, one per architecture) ships inside this repo and is used
-directly -- no system package needed at all.
+## Credits
 
-## What's bundled
+This integration is a Home Assistant wrapper around the **Inflect** text-to-speech
+models by [owensong](https://huggingface.co/owensong) -- all credit for the
+models themselves goes there. See the model cards for details:
 
-- `custom_components/inflect_tts/models/` -- the ONNX model graphs and
-  text frontend for both models (~52MB total)
-- `custom_components/inflect_tts/espeak/{x86_64,aarch64}/` -- a
-  musl-built `libespeak-ng.so.1` + its data files + two small runtime
-  dependencies, so phonemization works out of the box on Alpine/HAOS
-  without any system package install
-
-No separate download step at runtime for any of the above.
+- [Inflect Nano v2](https://huggingface.co/owensong/Inflect-Nano-v2)
+- [Inflect Micro v2](https://huggingface.co/owensong/Inflect-Micro-v2)
