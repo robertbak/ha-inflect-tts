@@ -21,20 +21,24 @@ from .const import (
     CONF_MODEL,
     CONF_SEED,
     CONF_SPEED,
+    CONF_STREAM_READ_AHEAD,
     CONF_STREAMING,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_MODEL,
     DEFAULT_SEED,
     DEFAULT_SPEED,
+    DEFAULT_STREAM_READ_AHEAD,
     DEFAULT_STREAMING,
     DEFAULT_VARIATION,
     DOMAIN,
     MAX_IDLE_UNLOAD_MINUTES,
     MAX_SPEED,
+    MAX_STREAM_READ_AHEAD,
     MAX_VARIATION,
     MIN_IDLE_UNLOAD_MINUTES,
     MIN_SPEED,
+    MIN_STREAM_READ_AHEAD,
     MIN_VARIATION,
     MODEL_NAMES,
     MODELS_DIR,
@@ -66,6 +70,14 @@ _IDLE_UNLOAD_SELECTOR = selector.NumberSelector(
         mode=selector.NumberSelectorMode.BOX,
     )
 )
+_STREAM_READ_AHEAD_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=MIN_STREAM_READ_AHEAD,
+        max=MAX_STREAM_READ_AHEAD,
+        step=1,
+        mode=selector.NumberSelectorMode.BOX,
+    )
+)
 
 
 def _tuning_fields(current: dict[str, Any]) -> dict[Any, Any]:
@@ -90,6 +102,10 @@ def _tuning_fields(current: dict[str, Any]) -> dict[Any, Any]:
         vol.Optional(
             CONF_STREAMING, default=current.get(CONF_STREAMING, DEFAULT_STREAMING)
         ): bool,
+        vol.Optional(
+            CONF_STREAM_READ_AHEAD,
+            default=current.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD),
+        ): _STREAM_READ_AHEAD_SELECTOR,
     }
 
 

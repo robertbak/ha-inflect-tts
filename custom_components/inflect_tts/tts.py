@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import queue as sync_queue
 import struct
+from collections.abc import Iterator
 from typing import Any
 
 from homeassistant.components.tts import (
@@ -26,12 +28,14 @@ from .const import (
     CONF_MODEL,
     CONF_SEED,
     CONF_SPEED,
+    CONF_STREAM_READ_AHEAD,
     CONF_STREAMING,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_LANG,
     DEFAULT_SEED,
     DEFAULT_SPEED,
+    DEFAULT_STREAM_READ_AHEAD,
     DEFAULT_STREAMING,
     DEFAULT_VARIATION,
     DOMAIN,
@@ -81,6 +85,31 @@ def _streaming_wav_header(
         b"data",
         unknown_size,
     )
+
+
+def _drain_chunks_into_queue(
+    chunk_gen: Iterator[bytes], out_queue: sync_queue.Queue
+) -> None:
+    """Runs in a background executor thread for the whole stream's
+    duration (not per-chunk), continuously pulling chunks from the
+    blocking generator and pushing them into a bounded queue. This is
+    what actually gives us read-ahead: since this thread keeps running
+    while the consumer is busy handing a chunk off to HA/the network,
+    synthesis of the NEXT sentence overlaps with transmission of the
+    current one instead of only starting once the consumer asks for it.
+    queue.Queue.put() blocks once the queue is full, which is exactly
+    the backpressure we want -- this thread won't race arbitrarily far
+    ahead of what's actually been consumed.
+    """
+    try:
+        for chunk in chunk_gen:
+            out_queue.put(chunk)
+    except InflectModelError as exc:
+        out_queue.put(exc)
+    except Exception as exc:  # noqa: BLE001
+        out_queue.put(InflectModelError(f"Synthesis failed: {exc}"))
+    finally:
+        out_queue.put(_STREAM_DONE)
 
 
 def stats_signal(entry_id: str) -> str:
@@ -133,6 +162,12 @@ class InflectTTSEntity(TextToSpeechEntity):
             settings.get(CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES)
         )
         self._streaming = bool(settings.get(CONF_STREAMING, DEFAULT_STREAMING))
+        self._stream_read_ahead = max(
+            1,
+            int(
+                settings.get(CONF_STREAM_READ_AHEAD, DEFAULT_STREAM_READ_AHEAD)
+            ),
+        )
         self._unload_timer_cancel = None
 
         self._attr_name = MODEL_NAMES[self._model_key]
@@ -218,22 +253,32 @@ class InflectTTSEntity(TextToSpeechEntity):
             ) from exc
 
         async def data_gen():
+            # Read-ahead buffer: a background thread drains chunk_gen
+            # continuously (not just when we ask for the next chunk), so
+            # synthesis of sentence N+1 overlaps with us handing sentence
+            # N off to HA/the network, instead of only starting once
+            # we've finished transmitting the current chunk. On hardware
+            # running close to real-time, that overlap is what prevents
+            # an audible gap between sentences.
+            out_queue: sync_queue.Queue = sync_queue.Queue(
+                maxsize=self._stream_read_ahead
+            )
+            self._hass.async_add_executor_job(
+                _drain_chunks_into_queue, chunk_gen, out_queue
+            )
             try:
                 yield _streaming_wav_header(engine.sample_rate)
                 while True:
-                    try:
-                        chunk = await self._hass.async_add_executor_job(
-                            next, chunk_gen, _STREAM_DONE
-                        )
-                    except InflectModelError as exc:
+                    item = await self._hass.async_add_executor_job(out_queue.get)
+                    if item is _STREAM_DONE:
+                        break
+                    if isinstance(item, InflectModelError):
                         raise HomeAssistantError(
                             translation_domain=DOMAIN,
                             translation_key="synthesis_error",
-                            translation_placeholders={"error": str(exc)},
-                        ) from exc
-                    if chunk is _STREAM_DONE:
-                        break
-                    yield chunk
+                            translation_placeholders={"error": str(item)},
+                        ) from item
+                    yield item
             finally:
                 # Runs whether the stream finished, errored, or the
                 # consumer disconnected early -- same bookkeeping the

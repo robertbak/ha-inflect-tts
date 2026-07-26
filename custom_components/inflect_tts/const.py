@@ -18,6 +18,7 @@ CONF_VARIATION = "variation"
 CONF_SEED = "seed"
 CONF_IDLE_UNLOAD_MINUTES = "idle_unload_minutes"
 CONF_STREAMING = "streaming"
+CONF_STREAM_READ_AHEAD = "stream_read_ahead"
 
 MODEL_MICRO = "micro"
 MODEL_NANO = "nano"
@@ -45,6 +46,13 @@ DEFAULT_IDLE_UNLOAD_MINUTES = 10
 # buffered (whole-message) behavior if streaming misbehaves with a given
 # media player or with HA's own TTS caching.
 DEFAULT_STREAMING = True
+# How many sentence chunks a background thread is allowed to synthesize
+# ahead of what's actually been sent to the consumer, while streaming.
+# Higher smooths over more variance in per-sentence synthesis time
+# (helps avoid audible gaps between sentences on slower hardware) at the
+# cost of a bit more memory held at once; 1 means "no read-ahead, purely
+# on-demand" (matches pre-0.9 behavior).
+DEFAULT_STREAM_READ_AHEAD = 2
 
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0
@@ -52,6 +60,8 @@ MIN_VARIATION = 0.0
 MAX_VARIATION = 1.0
 MIN_IDLE_UNLOAD_MINUTES = 0
 MAX_IDLE_UNLOAD_MINUTES = 240
+MIN_STREAM_READ_AHEAD = 1
+MAX_STREAM_READ_AHEAD = 10
 
 SUPPORT_LANGUAGES = ["en-US"]
 DEFAULT_LANG = "en-US"
