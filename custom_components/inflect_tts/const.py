@@ -17,6 +17,7 @@ CONF_SPEED = "speed"
 CONF_VARIATION = "variation"
 CONF_SEED = "seed"
 CONF_IDLE_UNLOAD_MINUTES = "idle_unload_minutes"
+CONF_STREAMING = "streaming"
 
 MODEL_MICRO = "micro"
 MODEL_NANO = "nano"
@@ -39,6 +40,11 @@ DEFAULT_SEED = 7
 # low-end hardware (e.g. Raspberry Pi); 0 disables idle unloading and keeps
 # the model resident once loaded, trading memory for lower latency.
 DEFAULT_IDLE_UNLOAD_MINUTES = 10
+# HA always calls the streaming entry point -- there's no per-call choice
+# for the end user -- so this is an escape hatch to fall back to the old
+# buffered (whole-message) behavior if streaming misbehaves with a given
+# media player or with HA's own TTS caching.
+DEFAULT_STREAMING = True
 
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0

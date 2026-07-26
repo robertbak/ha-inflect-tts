@@ -21,11 +21,13 @@ from .const import (
     CONF_MODEL,
     CONF_SEED,
     CONF_SPEED,
+    CONF_STREAMING,
     CONF_VARIATION,
     DEFAULT_IDLE_UNLOAD_MINUTES,
     DEFAULT_MODEL,
     DEFAULT_SEED,
     DEFAULT_SPEED,
+    DEFAULT_STREAMING,
     DEFAULT_VARIATION,
     DOMAIN,
     MAX_IDLE_UNLOAD_MINUTES,
@@ -85,6 +87,9 @@ def _tuning_fields(current: dict[str, Any]) -> dict[Any, Any]:
                 CONF_IDLE_UNLOAD_MINUTES, DEFAULT_IDLE_UNLOAD_MINUTES
             ),
         ): _IDLE_UNLOAD_SELECTOR,
+        vol.Optional(
+            CONF_STREAMING, default=current.get(CONF_STREAMING, DEFAULT_STREAMING)
+        ): bool,
     }
 
 
