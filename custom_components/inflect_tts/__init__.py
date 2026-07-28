@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import CONF_MODEL
-from .model import unload_engine
 from .onnxruntime_install import OnnxRuntimeInstallError, ensure_onnxruntime
 
 PLATFORMS = [Platform.TTS, Platform.SENSOR]
@@ -35,7 +34,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an Inflect TTS config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    from .model import unload_engine
+
+    unloaded = await hass.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await hass.async_add_executor_job(unload_engine, entry.data[CONF_MODEL])
     return unloaded
